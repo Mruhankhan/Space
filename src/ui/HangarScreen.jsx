@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { getRockets, saveRocket } from '../save.js'
 import { sound } from '../sound.js'
 
@@ -13,17 +13,55 @@ const COLORS = [
   { label: 'Forest',     hex: '#2e4a2e', accent: '#88cc44' },
 ]
 
+const TEMPLATES = [
+  { label: 'Falcon 9', value: 'falcon9', stages: 2 },
+  { label: 'Saturn V', value: 'saturnv', stages: 3 },
+  { label: 'Custom',   value: 'custom', stages: 2 },
+]
+
 export default function HangarScreen({ onBack, onTestFacility, onRocketChange }) {
   const [rockets, setRockets] = useState(getRockets)
   const [selected, setSelected] = useState(0)
   const [colorIdx, setColorIdx] = useState(0)
+  const [templateIdx, setTemplateIdx] = useState(0)
+  const [stageCount, setStageCount] = useState(2)
 
   const activeRocket = rockets[selected]
+
+  React.useEffect(() => {
+    if (!activeRocket) return
+    const curColor = COLORS.findIndex(c => c.hex === activeRocket.color)
+    setColorIdx(curColor >= 0 ? curColor : 0)
+    const curTemplate = TEMPLATES.findIndex(t => t.value === activeRocket.template)
+    setTemplateIdx(curTemplate >= 0 ? curTemplate : 0)
+    setStageCount(activeRocket.stages || TEMPLATES[curTemplate >= 0 ? curTemplate : 0].stages)
+  }, [activeRocket])
 
   function handleColorPick(idx) {
     sound.play('click')
     setColorIdx(idx)
     const updated = { ...activeRocket, color: COLORS[idx].hex, accentColor: COLORS[idx].accent }
+    const newRockets = rockets.map((r, i) => i === selected ? updated : r)
+    setRockets(newRockets)
+    saveRocket(updated)
+    onRocketChange?.(updated)
+  }
+
+  function handleTemplatePick(idx) {
+    sound.play('click')
+    setTemplateIdx(idx)
+    const template = TEMPLATES[idx]
+    const updated = { ...activeRocket, template: template.value, stages: Math.max(2, template.stages) }
+    const newRockets = rockets.map((r, i) => i === selected ? updated : r)
+    setRockets(newRockets)
+    saveRocket(updated)
+    onRocketChange?.(updated)
+  }
+
+  function handleStagePick(stages) {
+    sound.play('click')
+    setStageCount(stages)
+    const updated = { ...activeRocket, stages }
     const newRockets = rockets.map((r, i) => i === selected ? updated : r)
     setRockets(newRockets)
     saveRocket(updated)
@@ -102,6 +140,40 @@ export default function HangarScreen({ onBack, onTestFacility, onRocketChange })
             </div>
             <div style={{ fontSize: 11, color: 'var(--c-muted)' }}>
               Selected: <span style={{ color: 'var(--c-cyan)' }}>{COLORS[colorIdx].label}</span> · {activeRocket.name}
+            </div>
+          </div>
+        )}
+
+        {activeRocket && (
+          <div className="paint-section">
+            <div className="label-sm">Rocket Blueprint</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              {TEMPLATES.map((t, i) => (
+                <button
+                  key={t.value}
+                  className={`btn btn-pill ${i === templateIdx ? 'active' : 'secondary'}`}
+                  onClick={() => handleTemplatePick(i)}
+                  type="button"
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="label-xs" style={{ marginBottom: 6 }}>Stages</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[1, 2, 3].map((stages) => (
+                <button
+                  key={stages}
+                  className={`btn btn-pill ${stageCount === stages ? 'active' : 'secondary'}`}
+                  onClick={() => handleStagePick(stages)}
+                  type="button"
+                >
+                  {stages} Stage{stages > 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--c-muted)', marginTop: 10 }}>
+              {activeRocket.name} is configured as a {stageCount}-stage {TEMPLATES[templateIdx]?.label || 'custom'} launcher.
             </div>
           </div>
         )}

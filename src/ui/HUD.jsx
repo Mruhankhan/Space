@@ -1,7 +1,7 @@
 import React, { useRef } from 'react'
 import { sound } from '../sound.js'
 
-export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket }) {
+export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket, launchReady, consoleProgress }) {
   const pos = position || { x: 0, y: 0, z: 0 }
   const lastTouchAction = useRef(0)
 
@@ -61,6 +61,9 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
                 <span style={{ color, fontFamily: 'var(--font-display)', fontSize: 9 }}>{val}%</span>
               </div>
             ))}
+            <div style={{ marginTop: 8, fontSize: 10, color: launchReady ? 'var(--c-success)' : 'var(--c-amber)' }}>
+              {consoleProgress}
+            </div>
           </div>
         </div>
       </div>

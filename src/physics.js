@@ -1,7 +1,7 @@
 // physics.js — lightweight AABB collision and character movement
 
 // Static collision boxes registered from world/rocket
-const _staticBoxes = [] // { min: Vector3, max: Vector3 }
+const _staticBoxes = [] // { min: Vector3, max: Vector3, ignoreWhenInside: boolean }
 
 export const physics = {
   async init() {
@@ -13,18 +13,23 @@ export const physics = {
   },
 
   /** Register a static mesh's bounding box for AABB collision */
-  addStatic(mesh) {
+  addStatic(mesh, options = {}) {
     if (!mesh.geometry) return
     mesh.updateWorldMatrix(true, false)
     mesh.geometry.computeBoundingBox()
     const box = mesh.geometry.boundingBox.clone()
     box.applyMatrix4(mesh.matrixWorld)
-    _staticBoxes.push({ min: box.min.clone(), max: box.max.clone() })
+    _staticBoxes.push({
+      min: box.min.clone(),
+      max: box.max.clone(),
+      ignoreWhenInside: !!options.ignoreWhenInside,
+    })
   },
 
   /** Simple point-box overlap test */
-  _overlaps(pos, r = 0.3) {
+  _overlaps(pos, r = 0.3, insideRocket = false) {
     for (const box of _staticBoxes) {
+      if (insideRocket && box.ignoreWhenInside) continue
       if (
         pos.x + r > box.min.x && pos.x - r < box.max.x &&
         pos.y       > box.min.y && pos.y - 1.8 < box.max.y &&
@@ -41,26 +46,27 @@ export const physics = {
    * @param {number} delta
    * @returns {{ grounded: boolean }}
    */
-  characterMove(position, velocity, delta) {
+  characterMove(position, velocity, delta, options = {}) {
     const STEPS = 3
     const dt = delta / STEPS
     let grounded = false
+    const insideRocket = !!options.insideRocket
 
     for (let s = 0; s < STEPS; s++) {
       // X
       const dx = velocity.x * dt
       position.x += dx
-      if (this._overlaps(position)) position.x -= dx
+      if (this._overlaps(position, 0.3, insideRocket)) position.x -= dx
 
       // Z
       const dz = velocity.z * dt
       position.z += dz
-      if (this._overlaps(position)) position.z -= dz
+      if (this._overlaps(position, 0.3, insideRocket)) position.z -= dz
 
       // Y
       const dy = velocity.y * dt
       position.y += dy
-      if (this._overlaps(position)) {
+      if (this._overlaps(position, 0.3, insideRocket)) {
         if (velocity.y < 0) { grounded = true }
         position.y -= dy
         velocity.y = 0

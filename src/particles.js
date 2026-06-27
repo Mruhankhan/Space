@@ -1,7 +1,7 @@
 // particles.js — Three.js Points-based particle system
 // Engine fire, smoke plume, and ignition sparks — no external assets
 
-import * as THREE from 'three'
+import { AdditiveBlending, BufferAttribute, BufferGeometry, Points, PointsMaterial, Vector3 } from 'three'
 
 let _scene = null
 const _systems = []
@@ -17,7 +17,7 @@ function _makeParticles({ count, spread, speed, color, size, lifetime, gravity =
     positions[i * 3]     = (Math.random() - 0.5) * spread
     positions[i * 3 + 1] = (Math.random() - 0.5) * spread * 0.3
     positions[i * 3 + 2] = (Math.random() - 0.5) * spread
-    velocities.push(new THREE.Vector3(
+    velocities.push(new Vector3(
       (Math.random() - 0.5) * speed,
       Math.random() * speed * 2,
       (Math.random() - 0.5) * speed
@@ -25,28 +25,40 @@ function _makeParticles({ count, spread, speed, color, size, lifetime, gravity =
     lifetimes.push(Math.random() * maxLife)
   }
 
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  const geo = new BufferGeometry()
+  geo.setAttribute('position', new BufferAttribute(positions, 3))
 
-  const mat = new THREE.PointsMaterial({
+  const mat = new PointsMaterial({
     color, size, sizeAttenuation: true,
     transparent: true, opacity: 0.85,
-    blending: THREE.AdditiveBlending,
+    blending: AdditiveBlending,
     depthWrite: false,
   })
 
-  const points = new THREE.Points(geo, mat)
+  const points = new Points(geo, mat)
   _scene.add(points)
 
-  return { points, geo, velocities, lifetimes, maxLife, gravity, color, size, active: true }
+  return {
+    points,
+    geo,
+    velocities,
+    lifetimes,
+    maxLife,
+    gravity,
+    color,
+    size,
+    active: true,
+    totalLife: lifetimes.reduce((sum, v) => sum + v, 0),
+  }
 }
 
 function _updateSystem(sys, delta) {
   const pos = sys.geo.attributes.position.array
   for (let i = 0; i < sys.velocities.length; i++) {
+    const previousLife = sys.lifetimes[i]
     sys.lifetimes[i] -= delta
     if (sys.lifetimes[i] <= 0) {
-      // respawn
+      sys.totalLife -= previousLife
       pos[i * 3]     = (Math.random() - 0.5) * 0.5
       pos[i * 3 + 1] = 0
       pos[i * 3 + 2] = (Math.random() - 0.5) * 0.5
@@ -56,7 +68,9 @@ function _updateSystem(sys, delta) {
         (Math.random() - 0.5) * 2
       )
       sys.lifetimes[i] = sys.maxLife
+      sys.totalLife += sys.maxLife
     } else {
+      sys.totalLife -= delta
       pos[i * 3]     += sys.velocities[i].x * delta
       pos[i * 3 + 1] += sys.velocities[i].y * delta
       pos[i * 3 + 2] += sys.velocities[i].z * delta
@@ -64,9 +78,7 @@ function _updateSystem(sys, delta) {
     }
   }
   sys.geo.attributes.position.needsUpdate = true
-  // fade opacity near end of life
-  const avgLife = sys.lifetimes.reduce((a, b) => a + b, 0) / sys.lifetimes.length
-  sys.points.material.opacity = Math.min(0.85, avgLife / sys.maxLife)
+  sys.points.material.opacity = Math.min(0.85, sys.totalLife / (sys.maxLife * sys.velocities.length))
 }
 
 // ── Public API ─────────────────────────────────────────────

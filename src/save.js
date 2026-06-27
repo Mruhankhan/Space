@@ -82,3 +82,9 @@ export function addLogEntry(entry) {
   log.unshift({ ...entry, timestamp: new Date().toISOString() })
   localStorage.setItem(KEYS.LOG, JSON.stringify(log.slice(0, 50)))
 }
+
+export function clearProgress() {
+  localStorage.removeItem(KEYS.PROFILE)
+  localStorage.removeItem(KEYS.ROCKETS)
+  localStorage.removeItem(KEYS.LOG)
+}

@@ -1,6 +1,6 @@
 // renderer.js — Three.js renderer, camera, scene, lighting
 
-import * as THREE from 'three'
+import { AmbientLight, Color, FogExp2, PerspectiveCamera, Scene, WebGLRenderer, PCFShadowMap, ACESFilmicToneMapping, SRGBColorSpace } from 'three'
 
 let _renderer, _scene, _camera, _animId, _resizeHandler
 
@@ -16,17 +16,17 @@ export const renderer = {
     const canvas = document.getElementById('three-canvas')
 
     // Scene
-    _scene = new THREE.Scene()
-    _scene.fog = new THREE.FogExp2(0x020c1b, 0.018)
+    _scene = new Scene()
+    _scene.fog = new FogExp2(0x020c1b, 0.018)
     this.scene = _scene
 
     // Camera
-    _camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000)
+    _camera = new PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000)
     _camera.position.set(0, 5, 20)
     this.camera = _camera
 
     // Renderer
-    _renderer = new THREE.WebGLRenderer({
+    _renderer = new WebGLRenderer({
       canvas,
       antialias: window.devicePixelRatio <= 1.5,
       alpha: false,
@@ -35,14 +35,14 @@ export const renderer = {
     _renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     _renderer.setSize(window.innerWidth, window.innerHeight)
     _renderer.shadowMap.enabled = true
-    _renderer.shadowMap.type = THREE.PCFShadowMap
-    _renderer.toneMapping = THREE.ACESFilmicToneMapping
+    _renderer.shadowMap.type = PCFShadowMap
+    _renderer.toneMapping = ACESFilmicToneMapping
     _renderer.toneMappingExposure = 1.35
-    _renderer.outputColorSpace = THREE.SRGBColorSpace
+    _renderer.outputColorSpace = SRGBColorSpace
     this.renderer = _renderer
 
     // Ambient base lighting
-    const ambient = new THREE.AmbientLight(0x0a1628, 0.8)
+    const ambient = new AmbientLight(0x0a1628, 0.8)
     ambient.userData.persistent = true
     _scene.add(ambient)
 
@@ -90,8 +90,16 @@ export const renderer = {
     })
   },
 
+  disposeObject(obj) {
+    obj.traverse(child => {
+      child.geometry?.dispose?.()
+      if (Array.isArray(child.material)) child.material.forEach(m => m.dispose?.())
+      else child.material?.dispose?.()
+    })
+  },
+
   setFog(color, density) {
-    _scene.fog = new THREE.FogExp2(color, density)
-    _scene.background = new THREE.Color(color)
+    _scene.fog = new FogExp2(color, density)
+    _scene.background = new Color(color)
   },
 }

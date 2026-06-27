@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { game, STATES }       from './game.js'
-import { getProfile }         from './save.js'
+import { getProfile, clearProgress } from './save.js'
 import ProfileScreen          from './ui/ProfileScreen.jsx'
 import MainMenu               from './ui/MainMenu.jsx'
 import HangarScreen           from './ui/HangarScreen.jsx'
@@ -11,7 +11,7 @@ export default function App() {
   const [screen, setScreen]         = useState(STATES.LOADING)
   const [profile, setProfile_]      = useState(null)
   const [activeMenu, setActiveMenu] = useState(null)
-  const [facilityData, setFacility] = useState({ position: { x:0,y:0,z:0 }, deckName: null, insideRocket: false })
+  const [facilityData, setFacility] = useState({ position: { x:0,y:0,z:0 }, deckName: null, insideRocket: false, launchReady: true, consoleProgress: 'No system checks required' })
   const [launchData, setLaunch]     = useState({ countdown: 10, status: '', result: null })
   const [selectedRocket, setRocket] = useState(null)
 
@@ -19,7 +19,13 @@ export default function App() {
   const handleGameUpdate = useCallback((state, payload) => {
     setScreen(state)
     if (state === STATES.FACILITY) {
-      if (payload.position || payload.deckName !== undefined || payload.insideRocket !== undefined) {
+      if (
+        payload.position ||
+        payload.deckName !== undefined ||
+        payload.insideRocket !== undefined ||
+        payload.launchReady !== undefined ||
+        payload.consoleProgress !== undefined
+      ) {
         setFacility(f => ({ ...f, ...payload }))
       }
     }
@@ -84,6 +90,19 @@ export default function App() {
     game.returnToMenu()
   }
 
+  function handleResetProgress() {
+    const confirmed = window.confirm('Reset all progress and return to the first screen? This will remove your profile, rockets, and mission log.')
+    if (!confirmed) return
+
+    clearProgress()
+    setProfile_(null)
+    setActiveMenu(null)
+    setRocket(null)
+    setLaunch({ countdown: 10, status: '', result: null })
+    setFacility({ position: { x: 0, y: 0, z: 0 }, deckName: null, insideRocket: false })
+    game.transition(STATES.PROFILE)
+  }
+
   // ── Render ───────────────────────────────────────────────
   return (
     <>
@@ -96,6 +115,7 @@ export default function App() {
           profile={profile}
           activeItem={activeMenu}
           onNavigate={handleMenuNav}
+          onResetProgress={handleResetProgress}
         />
       )}
 
@@ -112,6 +132,8 @@ export default function App() {
           deck={facilityData.deckName}
           position={facilityData.position}
           insideRocket={facilityData.insideRocket}
+          launchReady={facilityData.launchReady}
+          consoleProgress={facilityData.consoleProgress}
           onExitToMenu={handleReturnToMenu}
           onLaunch={handleLaunch}
         />

@@ -1,4 +1,4 @@
-import * as THREE from 'three'
+import { Vector3 } from 'three'
 import { particles } from './particles.js'
 import { sound } from './sound.js'
 import { addLogEntry } from './save.js'
@@ -20,7 +20,8 @@ export class Launch {
     this._success = false
 
     this._origCamPos = camera.position.clone()
-    this._origCamLook = new THREE.Vector3(0, 0, 0)
+    this._origCamLook = new Vector3(0, 0, 0)
+    this.config = rocket.userData?.config || {}
   }
 
   start() {
@@ -54,7 +55,7 @@ export class Launch {
           setStatus('ENGINE IGNITION')
           sound.play('thruster')
           particles.startEngineFlare(this.rocket.position)
-          particles.startSmokePlume(new THREE.Vector3(this.rocket.position.x, 0.3, this.rocket.position.z))
+          particles.startSmokePlume(new Vector3(this.rocket.position.x, 0.3, this.rocket.position.z))
           particles.startSparks(this.rocket.position.clone().setY(1))
         }
       }
@@ -69,15 +70,13 @@ export class Launch {
     else if (this.state === 'flight') {
       this._flightTime += delta
 
-      // Rocket rises
-      const altitude = Math.pow(this._flightTime, 2) * 4
+      const stageCount = Math.max(1, Math.min(3, this.config.stages || 2))
+      const templateBonus = this.config.template === 'saturnv' ? 1.4 : this.config.template === 'falcon9' ? 1.2 : 1.0
+      const speedFactor = 4 + stageCount * 0.9 + templateBonus
+      const altitude = Math.pow(this._flightTime, 2) * speedFactor
       this.rocket.position.y = altitude
       this._maxAltitude = Math.max(this._maxAltitude, altitude)
 
-      // Particle systems follow rocket
-      // (particles attached to rocket group handle this automatically)
-
-      // Camera follows — pull back and track upward
       const camRadius = 40 + this._flightTime * 5
       const camAngle  = Math.PI * 0.3
       this.camera.position.set(
@@ -87,10 +86,20 @@ export class Launch {
       )
       this.camera.lookAt(this.rocket.position)
 
-      // Mission complete at T+20
       if (this._flightTime >= 20) {
-        this._success = true
-        this._end(true, 'Stage 1 complete')
+        const expectedStages = this.config.template === 'saturnv' ? 3 : 2
+        let message = 'Stage 1 complete'
+        let success = true
+
+        if (stageCount < expectedStages) {
+          success = false
+          message = 'Staging failure: missing upper stage'
+        } else if (this.config.template === 'custom' && stageCount < 2) {
+          success = false
+          message = 'Design instability caused a failure'
+        }
+
+        this._end(success, message)
       }
     }
   }

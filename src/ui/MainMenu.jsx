@@ -9,7 +9,7 @@ const NAV = [
   { id: 'log',      icon: '📋', label: 'Pilot Log',             hint: 'Review past missions', isDivider: true },
 ]
 
-export default function MainMenu({ profile, activeItem, onNavigate }) {
+export default function MainMenu({ profile, activeItem, onNavigate, onResetProgress }) {
   const log = getLog()
   const initials = (profile?.callsign || '??').slice(0, 2)
 
@@ -57,7 +57,18 @@ export default function MainMenu({ profile, activeItem, onNavigate }) {
 
         {/* Footer */}
         <div className="menu-footer">
-          Space Rocket Builder Simulator v0.1.0 · Milestone 1
+          <button
+            type="button"
+            className="menu-reset-btn"
+            onClick={() => {
+              sound.play('click')
+              onResetProgress?.()
+            }}
+            onMouseEnter={() => sound.play('hover')}
+          >
+            Reset Progress
+          </button>
+          <div style={{ marginTop: 12 }}>Space Rocket Builder Simulator v0.1.0 · Milestone 1</div>
         </div>
       </div>
     </div>
