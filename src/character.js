@@ -12,6 +12,7 @@ const GRAVITY     = -20
 const CAM_DIST    = 6
 const CAM_HEIGHT  = 2
 const CAM_SMOOTHING = 6
+const DECK_HEIGHTS = [3.25, 10.25, 18.25]
 
 // ── Astronaut model builder ───────────────────────────────
 function buildAstronaut() {
@@ -182,7 +183,15 @@ export class Character {
       this.mesh.position.y += Math.abs(Math.sin(this._walkTime)) * 0.005
     }
 
-    // ── Deck detection (inside rocket) ─────────────────────
+    // ── Interaction / deck detection ───────────────────────
+    if (input.consumeAction('interact')) {
+      if (this.insideRocket) {
+        this._cycleRocketDeck()
+      } else if (Math.hypot(this.mesh.position.x, this.mesh.position.z) < 2.6 && this.mesh.position.y < 4) {
+        this.enterRocket()
+      }
+    }
+
     if (this.insideRocket && this.onDeckChange) {
       const deck = getDeckForY(this.mesh.position.y)
       if (deck !== this.currentDeck) {
@@ -211,12 +220,31 @@ export class Character {
   enterRocket() {
     this.insideRocket = true
     this.currentDeck  = -1
+    this.mesh.position.set(0, DECK_HEIGHTS[0], 0)
+    this.velocity.set(0, 0, 0)
+    this.onDeckChange?.(DECK_NAMES[0])
   }
 
   /** Exit rocket */
   exitRocket() {
     this.insideRocket = false
     this.currentDeck  = -1
+    this.mesh.position.set(3.2, 0.4, 3.2)
+    this.velocity.set(0, 0, 0)
+    this.onDeckChange?.(null)
+  }
+
+  _cycleRocketDeck() {
+    const nextDeck = this.currentDeck < 0 ? 0 : this.currentDeck + 1
+    if (nextDeck >= DECK_HEIGHTS.length) {
+      this.exitRocket()
+      return
+    }
+
+    this.currentDeck = nextDeck
+    this.mesh.position.set(0, DECK_HEIGHTS[nextDeck], 0)
+    this.velocity.set(0, 0, 0)
+    this.onDeckChange?.(DECK_NAMES[nextDeck])
   }
 
   dispose() {

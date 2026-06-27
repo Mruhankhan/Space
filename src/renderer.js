@@ -2,14 +2,17 @@
 
 import * as THREE from 'three'
 
-let _renderer, _scene, _camera, _animId
+let _renderer, _scene, _camera, _animId, _resizeHandler
 
 export const renderer = {
   scene: null,
   camera: null,
   renderer: null,
+  _ready: false,
 
   init() {
+    if (this._ready) return
+
     const canvas = document.getElementById('three-canvas')
 
     // Scene
@@ -23,22 +26,30 @@ export const renderer = {
     this.camera = _camera
 
     // Renderer
-    _renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false })
-    _renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    _renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: window.devicePixelRatio <= 1.5,
+      alpha: false,
+      powerPreference: 'high-performance',
+    })
+    _renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     _renderer.setSize(window.innerWidth, window.innerHeight)
     _renderer.shadowMap.enabled = true
-    _renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    _renderer.shadowMap.type = THREE.PCFShadowMap
     _renderer.toneMapping = THREE.ACESFilmicToneMapping
-    _renderer.toneMappingExposure = 1.2
+    _renderer.toneMappingExposure = 1.35
     _renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer = _renderer
 
     // Ambient base lighting
     const ambient = new THREE.AmbientLight(0x0a1628, 0.8)
+    ambient.userData.persistent = true
     _scene.add(ambient)
 
     // Resize
-    window.addEventListener('resize', this._onResize.bind(this))
+    _resizeHandler = this._onResize.bind(this)
+    window.addEventListener('resize', _resizeHandler)
+    this._ready = true
   },
 
   _onResize() {
@@ -49,6 +60,7 @@ export const renderer = {
 
   /** Start the render loop, calling onTick(delta) each frame */
   startLoop(onTick) {
+    this.stopLoop()
     let last = performance.now()
     const loop = (now) => {
       _animId = requestAnimationFrame(loop)
@@ -70,7 +82,12 @@ export const renderer = {
     _scene.traverse(obj => {
       if (obj !== _scene && !obj.userData.persistent) toRemove.push(obj)
     })
-    toRemove.forEach(obj => _scene.remove(obj))
+    toRemove.forEach(obj => {
+      _scene.remove(obj)
+      obj.geometry?.dispose?.()
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose?.())
+      else obj.material?.dispose?.()
+    })
   },
 
   setFog(color, density) {

@@ -1,42 +1,21 @@
 // physics.js — lightweight AABB collision and character movement
-// Uses Rapier3D if available, falls back to manual AABB
-
-let _rapier = null
-let _world = null
-let _characterController = null
 
 // Static collision boxes registered from world/rocket
 const _staticBoxes = [] // { min: Vector3, max: Vector3 }
 
 export const physics = {
   async init() {
-    try {
-      const RAPIER = await import('@dimforge/rapier3d-compat')
-      await RAPIER.init()
-      _rapier = RAPIER
-      const gravity = { x: 0, y: -20, z: 0 }
-      _world = new RAPIER.World(gravity)
-      _characterController = _world.createCharacterController(0.05)
-      _characterController.setSlideEnabled(true)
-      _characterController.setApplyImpulsesToDynamicBodies(true)
-      _characterController.setMaxSlopeClimbAngle(45 * Math.PI / 180)
-      console.log('[physics] Rapier initialised')
-    } catch (e) {
-      console.warn('[physics] Rapier unavailable, using AABB fallback', e)
-      _rapier = null
-    }
+    console.log('[physics] Lightweight AABB collision ready')
   },
 
   step(delta) {
-    if (_world) {
-      _world.timestep = delta
-      _world.step()
-    }
+    // Static AABB collision does not need a world step.
   },
 
   /** Register a static mesh's bounding box for AABB collision */
   addStatic(mesh) {
     if (!mesh.geometry) return
+    mesh.updateWorldMatrix(true, false)
     mesh.geometry.computeBoundingBox()
     const box = mesh.geometry.boundingBox.clone()
     box.applyMatrix4(mesh.matrixWorld)
@@ -69,19 +48,22 @@ export const physics = {
 
     for (let s = 0; s < STEPS; s++) {
       // X
-      position.x += velocity.x * dt
-      if (this._overlaps(position)) position.x -= velocity.x * dt
+      const dx = velocity.x * dt
+      position.x += dx
+      if (this._overlaps(position)) position.x -= dx
 
       // Z
-      position.z += velocity.z * dt
-      if (this._overlaps(position)) position.z -= velocity.z * dt
+      const dz = velocity.z * dt
+      position.z += dz
+      if (this._overlaps(position)) position.z -= dz
 
       // Y
-      position.y += velocity.y * dt
+      const dy = velocity.y * dt
+      position.y += dy
       if (this._overlaps(position)) {
         if (velocity.y < 0) { grounded = true }
+        position.y -= dy
         velocity.y = 0
-        position.y -= velocity.y * dt
         // snap to surface
         if (grounded) position.y = Math.round(position.y * 100) / 100
       }

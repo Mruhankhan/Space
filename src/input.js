@@ -1,6 +1,7 @@
 // input.js — centralised keyboard/mouse input, remappable, disable-aware
 
 const _keys = new Set()
+const _pressed = new Set()
 const _mousePos = { x: 0, y: 0 }
 const _mouseDelta = { x: 0, y: 0 }
 let _enabled = true
@@ -20,6 +21,7 @@ const _actions = {
 // ── Event listeners ────────────────────────────────────────
 window.addEventListener('keydown', e => {
   if (!_enabled) return
+  if (!_keys.has(e.code)) _pressed.add(e.code)
   _keys.add(e.code)
   if (e.code === 'Space') e.preventDefault()
 })
@@ -47,6 +49,14 @@ export const input = {
   isAction(name) {
     if (!_enabled) return false
     return (_actions[name] || []).some(code => _keys.has(code))
+  },
+
+  consumeAction(name) {
+    if (!_enabled) return false
+    const codes = _actions[name] || []
+    const hit = codes.some(code => _pressed.has(code))
+    codes.forEach(code => _pressed.delete(code))
+    return hit
   },
 
   /** Movement vector {x, z} normalised, ready for Three.js */
@@ -81,6 +91,12 @@ export const input = {
     document.exitPointerLock?.()
   },
 
-  disable() { _enabled = false; _keys.clear() },
+  disable() { _enabled = false; _keys.clear(); _pressed.clear() },
   enable()  { _enabled = true },
 }
+
+window.addEventListener('pointerdown', e => {
+  const canvas = document.getElementById('three-canvas')
+  if (!_enabled || _pointerLocked || e.button !== 0 || e.target !== canvas) return
+  canvas.requestPointerLock()
+})

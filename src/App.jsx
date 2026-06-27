@@ -102,6 +102,7 @@ export default function App() {
       {screen === STATES.HANGAR && (
         <HangarScreen
           onBack={() => game.transition(STATES.MAIN_MENU)}
+          onRocketChange={(rocket) => game.previewRocket(rocket)}
           onTestFacility={handleEnterFacility}
         />
       )}

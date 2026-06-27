@@ -13,7 +13,7 @@ const COLORS = [
   { label: 'Forest',     hex: '#2e4a2e', accent: '#88cc44' },
 ]
 
-export default function HangarScreen({ onBack, onTestFacility }) {
+export default function HangarScreen({ onBack, onTestFacility, onRocketChange }) {
   const [rockets, setRockets] = useState(getRockets)
   const [selected, setSelected] = useState(0)
   const [colorIdx, setColorIdx] = useState(0)
@@ -27,6 +27,7 @@ export default function HangarScreen({ onBack, onTestFacility }) {
     const newRockets = rockets.map((r, i) => i === selected ? updated : r)
     setRockets(newRockets)
     saveRocket(updated)
+    onRocketChange?.(updated)
   }
 
   function handleSelectRocket(idx) {
@@ -34,6 +35,7 @@ export default function HangarScreen({ onBack, onTestFacility }) {
     setSelected(idx)
     const curColor = COLORS.findIndex(c => c.hex === rockets[idx].color)
     setColorIdx(curColor >= 0 ? curColor : 0)
+    onRocketChange?.(rockets[idx])
   }
 
   return (

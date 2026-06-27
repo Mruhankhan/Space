@@ -5,6 +5,8 @@ let _masterGain = null
 let _ambientOsc = null
 let _ambientGain = null
 let _thrusterNode = null
+let _unlocked = false
+let _pendingAmbient = null
 
 function _getCtx() {
   if (!_ctx) {
@@ -117,6 +119,7 @@ function _stopThruster() {
 export const sound = {
   play(name) {
     try {
+      if (!_ctx && !_unlocked) return
       switch (name) {
         case 'click':    _blip(660, 0.08, 'square'); break
         case 'hover':    _blip(440, 0.05, 'sine'); break
@@ -131,6 +134,10 @@ export const sound = {
 
   setAmbient(scene) {
     try {
+      if (!_ctx && !_unlocked) {
+        _pendingAmbient = scene
+        return
+      }
       switch (scene) {
         case 'menu':     _startAmbient(55, 6); break
         case 'hangar':   _startAmbient(40, 4); break
@@ -146,6 +153,14 @@ export const sound = {
 
   /** Must be called from a user gesture to resume AudioContext */
   resume() {
-    try { _getCtx().resume() } catch {}
+    try {
+      _unlocked = true
+      _getCtx().resume()
+      if (_pendingAmbient) {
+        const scene = _pendingAmbient
+        _pendingAmbient = null
+        this.setAmbient(scene)
+      }
+    } catch {}
   },
 }
