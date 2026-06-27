@@ -1,5 +1,3 @@
-// launch.js — Countdown, engine ignition, trajectory arc, results
-
 import * as THREE from 'three'
 import { particles } from './particles.js'
 import { sound } from './sound.js'
@@ -14,7 +12,7 @@ export class Launch {
     this.rocket = rocket
     this.onComplete = onComplete
 
-    this.state = 'idle'  // idle → countdown → ignition → flight → result
+    this.state = 'idle' 
     this.countdown = COUNTDOWN_FROM
     this._elapsed = 0
     this._flightTime = 0
