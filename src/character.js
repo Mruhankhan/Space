@@ -5,13 +5,17 @@ import { input } from './input.js'
 import { physics } from './physics.js'
 import { getDeckForY, DECK_NAMES } from './rocket.js'
 
-const WALK_SPEED  = 7
-const SPRINT_MULT = 1.8
-const JUMP_FORCE  = 8
-const GRAVITY     = -20
-const CAM_DIST    = 6
-const CAM_HEIGHT  = 2
-const CAM_SMOOTHING = 6
+const WALK_SPEED      = 9
+const SPRINT_MULT     = 2.2
+const JUMP_FORCE      = 8
+const GRAVITY         = -20
+const ACCELERATION    = 48
+const DECELERATION    = 70
+const CAM_DIST        = 5.8
+const CAM_HEIGHT      = 2
+const CAM_SMOOTHING   = 10
+const MIN_CAM_PITCH   = -0.6
+const MAX_CAM_PITCH   = 0.8
 const DECK_HEIGHTS = [3.25, 10.25, 18.25]
 
 // ── Astronaut model builder ───────────────────────────────
@@ -98,6 +102,17 @@ export class Character {
     this._camYaw   = 0   // horizontal angle
     this._camPitch = 0.3 // vertical angle
     this._camTarget = new THREE.Vector3()
+    this._cameraLookAt = new THREE.Vector3()
+
+    // Movement helper vectors reused each frame for performance
+    this._forward = new THREE.Vector3()
+    this._right = new THREE.Vector3()
+    this._move = new THREE.Vector3()
+    this._desiredVelocity = new THREE.Vector3()
+    this._currentVelocityXZ = new THREE.Vector3()
+    this._velocityDelta = new THREE.Vector3()
+    this._camOffset = new THREE.Vector3()
+    this._targetPos = new THREE.Vector3()
 
     // Walk animation
     this._walkTime = 0
@@ -116,32 +131,56 @@ export class Character {
 
   /** Per-frame update. Returns current deck index (or -1). */
   update(delta, camera) {
-    // ── Mouse look ──────────────────────────────────────────
+    // ── Look input ──────────────────────────────────────────
+    const lookDelta = { x: 0, y: 0 }
     if (input.isPointerLocked()) {
-      const delta_ = input.consumeMouseDelta()
-      this._camYaw   -= delta_.x * 0.003
-      this._camPitch -= delta_.y * 0.003
-      this._camPitch  = Math.max(-0.6, Math.min(0.8, this._camPitch))
+      const mouseDelta = input.consumeMouseDelta()
+      lookDelta.x += mouseDelta.x
+      lookDelta.y += mouseDelta.y
     }
+    const gamepadLook = input.getLookDelta()
+    lookDelta.x += gamepadLook.x
+    lookDelta.y += gamepadLook.y
+
+    this._camYaw   -= lookDelta.x * 0.005
+    this._camPitch -= lookDelta.y * 0.005
+    this._camPitch  = Math.max(MIN_CAM_PITCH, Math.min(MAX_CAM_PITCH, this._camPitch))
 
     // ── Movement ────────────────────────────────────────────
     const mv = input.getMovement()
-    const speed = WALK_SPEED * (input.isSprinting() ? SPRINT_MULT : 1)
+    const targetSpeed = WALK_SPEED * (input.isSprinting() ? SPRINT_MULT : 1)
 
-    const forward = new THREE.Vector3(-Math.sin(this._camYaw), 0, -Math.cos(this._camYaw))
-    const right   = new THREE.Vector3(-forward.z, 0, forward.x)
+    this._forward.set(-Math.sin(this._camYaw), 0, -Math.cos(this._camYaw))
+    this._right.set(-this._forward.z, 0, this._forward.x)
 
-    const move = new THREE.Vector3()
-    move.addScaledVector(forward, -mv.z)
-    move.addScaledVector(right,    mv.x)
-    if (move.length() > 0) {
-      move.normalize().multiplyScalar(speed)
-      this.mesh.rotation.y = this._camYaw + (mv.z !== 0 ? Math.atan2(mv.x, mv.z) : 0)
+    this._move.set(0, 0, 0)
+    this._move.addScaledVector(this._forward, -mv.z)
+    this._move.addScaledVector(this._right, mv.x)
+    if (this._move.lengthSq() > 0.0001) {
+      this._move.normalize().multiplyScalar(targetSpeed)
     }
 
-    this.velocity.x = move.x
-    this.velocity.z = move.z
+    this._currentVelocityXZ.set(this.velocity.x, 0, this.velocity.z)
+    this._desiredVelocity.copy(this._move)
+    this._velocityDelta.subVectors(this._desiredVelocity, this._currentVelocityXZ)
+
+    const maxChange = (this._desiredVelocity.lengthSq() > 0.001 ? ACCELERATION : DECELERATION) * delta
+    if (this._velocityDelta.length() > maxChange) {
+      this._velocityDelta.setLength(maxChange)
+    }
+    this._currentVelocityXZ.add(this._velocityDelta)
+
+    if (this._currentVelocityXZ.lengthSq() < 0.01 && this._desiredVelocity.lengthSq() < 0.01) {
+      this._currentVelocityXZ.set(0, 0, 0)
+    }
+
+    this.velocity.x = this._currentVelocityXZ.x
+    this.velocity.z = this._currentVelocityXZ.z
     this.velocity.y += GRAVITY * delta
+
+    if (this._move.lengthSq() > 0.0001) {
+      this.mesh.rotation.y = this._camYaw + Math.atan2(mv.x, mv.z)
+    }
 
     // Jump
     if (this.grounded && input.isAction('jump')) {
@@ -155,7 +194,6 @@ export class Character {
       this.grounded = true
       this.velocity.y = 0
     } else {
-      // Ground snap
       const gy = physics.groundY(this.mesh.position)
       if (gy !== -Infinity && this.mesh.position.y <= gy + 0.15) {
         this.mesh.position.y = gy
@@ -166,7 +204,6 @@ export class Character {
       }
     }
 
-    // Prevent going below world floor
     if (this.mesh.position.y < 0) {
       this.mesh.position.y = 0
       this.velocity.y = 0
@@ -174,16 +211,15 @@ export class Character {
     }
 
     // ── Walk animation ──────────────────────────────────────
-    const moving = Math.abs(mv.x) + Math.abs(mv.z) > 0
+    const moving = Math.abs(this._desiredVelocity.x) + Math.abs(this._desiredVelocity.z) > 0
     if (moving) {
-      this._walkTime += delta * speed * 2.5
+      this._walkTime += delta * (1 + this._currentVelocityXZ.length() / WALK_SPEED) * 4
       const swing = Math.sin(this._walkTime) * 0.35
-      if (this._legL) this._legL.rotation.x =  swing
+      if (this._legL) this._legL.rotation.x = swing
       if (this._legR) this._legR.rotation.x = -swing
       this.mesh.position.y += Math.abs(Math.sin(this._walkTime)) * 0.005
     }
 
-    // ── Interaction / deck detection ───────────────────────
     if (input.consumeAction('interact')) {
       if (this.insideRocket) {
         this._cycleRocketDeck()
@@ -201,17 +237,18 @@ export class Character {
     }
 
     // ── Camera follow ───────────────────────────────────────
-    const camOffset = new THREE.Vector3(
+    this._camOffset.set(
       Math.sin(this._camYaw) * CAM_DIST,
       CAM_HEIGHT + Math.sin(this._camPitch) * CAM_DIST,
       Math.cos(this._camYaw) * CAM_DIST
     )
 
-    const targetPos = this.mesh.position.clone().add(camOffset)
-    this._camTarget.lerp(targetPos, delta * CAM_SMOOTHING)
+    this._targetPos.copy(this.mesh.position).add(this._camOffset)
+    this._camTarget.lerp(this._targetPos, Math.min(1, delta * CAM_SMOOTHING))
 
     camera.position.copy(this._camTarget)
-    camera.lookAt(this.mesh.position.clone().setY(this.mesh.position.y + 1.4))
+    this._cameraLookAt.copy(this.mesh.position).setY(this.mesh.position.y + 1.4)
+    camera.lookAt(this._cameraLookAt)
 
     return this.currentDeck
   }

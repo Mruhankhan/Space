@@ -18,6 +18,28 @@ const _actions = {
   pause:        ['Escape'],
 }
 
+const GAMEPAD_DEADZONE = 0.18
+
+function _applyDeadzone(value) {
+  if (Math.abs(value) < GAMEPAD_DEADZONE) return 0
+  return value > 0
+    ? (value - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE)
+    : (value + GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE)
+}
+
+function _getGamepadAxes() {
+  const pads = navigator.getGamepads?.()
+  if (!pads || !pads[0]) return null
+  const gp = pads[0]
+  if (!gp.axes) return null
+  return {
+    leftX:  _applyDeadzone(gp.axes[0] ?? 0),
+    leftY:  _applyDeadzone(gp.axes[1] ?? 0),
+    rightX: _applyDeadzone(gp.axes[2] ?? 0),
+    rightY: _applyDeadzone(gp.axes[3] ?? 0),
+  }
+}
+
 // ── Event listeners ────────────────────────────────────────
 window.addEventListener('keydown', e => {
   if (!_enabled) return
@@ -67,10 +89,28 @@ export const input = {
     if (this.isAction('moveBack'))     z += 1
     if (this.isAction('moveLeft'))     x -= 1
     if (this.isAction('moveRight'))    x += 1
-    // normalise diagonal
+
+    if (x === 0 && z === 0) {
+      const gp = _getGamepadAxes()
+      if (gp) {
+        x = gp.leftX
+        z = gp.leftY
+      }
+    }
+
     const len = Math.sqrt(x * x + z * z)
-    if (len > 0) { x /= len; z /= len }
+    if (len > 1) { x /= len; z /= len }
     return { x, z }
+  },
+
+  getLookDelta() {
+    if (!_enabled) return { x: 0, y: 0 }
+    const gp = _getGamepadAxes()
+    if (!gp) return { x: 0, y: 0 }
+    return {
+      x: gp.rightX * 6,
+      y: gp.rightY * 6,
+    }
   },
 
   /** Consume and return accumulated mouse delta (resets after read) */
