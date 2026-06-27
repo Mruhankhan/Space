@@ -1,0 +1,287 @@
+// game.js — State machine and game loop orchestrator
+
+import * as THREE from 'three'
+import { renderer }      from './renderer.js'
+import { physics }       from './physics.js'
+import { input }         from './input.js'
+import { sound }         from './sound.js'
+import { particles }     from './particles.js'
+import { buildMenuScene, buildHangarScene, buildFacilityScene } from './world.js'
+import { buildRocket }   from './rocket.js'
+import { Character }     from './character.js'
+import { Launch }        from './launch.js'
+import { getRockets }    from './save.js'
+
+export const STATES = {
+  LOADING:      'LOADING',
+  PROFILE:      'PROFILE',
+  MAIN_MENU:    'MAIN_MENU',
+  HANGAR:       'HANGAR',
+  FACILITY:     'FACILITY',
+  LAUNCH:       'LAUNCH',
+}
+
+class Game {
+  constructor() {
+    this.state       = STATES.LOADING
+    this._uiCallback = null   // called (state, payload) to update React UI
+    this._sceneData  = {}
+    this._character  = null
+    this._rocket     = null
+    this._launch     = null
+    this._menuTime   = 0
+    this._warningFlash = 0
+  }
+
+  // ── Initialization ─────────────────────────────────────────
+  async init() {
+    renderer.init()
+    await physics.init()
+    particles.init(renderer.scene)
+    renderer.startLoop(this._tick.bind(this))
+    console.log('[game] Initialised')
+  }
+
+  // ── State transitions ──────────────────────────────────────
+  transition(newState, payload = {}) {
+    console.log(`[game] ${this.state} → ${newState}`)
+
+    // Cleanup previous state
+    this._cleanupState(this.state)
+
+    this.state = newState
+
+    switch (newState) {
+      case STATES.PROFILE:
+        renderer.clearScene()
+        renderer.setFog(0x020c1b, 0.04)
+        this._buildMenuRoom()
+        input.disable()
+        sound.setAmbient('menu')
+        break
+
+      case STATES.MAIN_MENU:
+        renderer.clearScene()
+        renderer.setFog(0x020c1b, 0.04)
+        this._sceneData = buildMenuScene(renderer.scene)
+        input.disable()
+        sound.setAmbient('menu')
+        renderer.camera.position.set(0, 5, 22)
+        renderer.camera.lookAt(0, 3, 0)
+        break
+
+      case STATES.HANGAR: {
+        renderer.clearScene()
+        renderer.setFog(0x030810, 0.025)
+        buildHangarScene(renderer.scene)
+        const rockets = getRockets()
+        const rocketConfig = payload.rocket || rockets[0]
+        this._rocket = buildRocket(rocketConfig)
+        this._rocket.position.set(0, 0.2, 0)
+        renderer.scene.add(this._rocket)
+        input.disable()
+        sound.setAmbient('hangar')
+        renderer.camera.position.set(6, 8, 14)
+        renderer.camera.lookAt(0, 10, 0)
+        break
+      }
+
+      case STATES.FACILITY: {
+        renderer.clearScene()
+        renderer.setFog(0x04111e, 0.012)
+        physics.clearStatic()
+        this._sceneData = buildFacilityScene(renderer.scene)
+
+        // Register collidable geometry
+        if (this._sceneData.collidables) {
+          this._sceneData.collidables.forEach(m => physics.addStatic(m))
+        }
+
+        const rocketConfig = payload.rocket || getRockets()[0]
+        this._rocket = buildRocket(rocketConfig)
+        this._rocket.position.set(0, 0.3, 0)
+        renderer.scene.add(this._rocket)
+        physics.addStatic(this._sceneData.ground)
+
+        this._character = new Character(renderer.scene)
+        this._character.setPosition(8, 2, 8)
+        this._character.onDeckChange = (deckName) => {
+          this._uiCallback?.(STATES.FACILITY, { deckName })
+        }
+
+        input.enable()
+        sound.setAmbient('facility')
+        input.requestPointerLock()
+        break
+      }
+
+      case STATES.LAUNCH:
+        // Launch is triggered from within FACILITY state
+        input.disable()
+        this._launch = new Launch(
+          renderer.scene,
+          renderer.camera,
+          this._rocket,
+          (result) => {
+            this._uiCallback?.(STATES.LAUNCH, { result })
+          }
+        )
+        this._launch.start()
+        break
+    }
+
+    this._uiCallback?.(newState, payload)
+  }
+
+  _cleanupState(prev) {
+    if (prev === STATES.FACILITY || prev === STATES.LAUNCH) {
+      if (this._character) { this._character.dispose(); this._character = null }
+      if (this._rocket)    { renderer.scene.remove(this._rocket); this._rocket = null }
+      particles.stop()
+      input.exitPointerLock()
+    }
+    if (prev === STATES.LAUNCH) {
+      this._launch = null
+    }
+  }
+
+  _buildMenuRoom() {
+    this._sceneData = buildMenuScene(renderer.scene)
+    renderer.camera.position.set(0, 5, 22)
+    renderer.camera.lookAt(0, 3, 0)
+  }
+
+  // ── UI callback registration ───────────────────────────────
+  onUIUpdate(cb) { this._uiCallback = cb }
+
+  // ── Game loop tick ─────────────────────────────────────────
+  _tick(delta) {
+    this._menuTime += delta
+    this._warningFlash += delta
+
+    switch (this.state) {
+      case STATES.MAIN_MENU:
+      case STATES.PROFILE:
+        this._tickMenu(delta)
+        break
+
+      case STATES.HANGAR:
+        this._tickHangar(delta)
+        break
+
+      case STATES.FACILITY:
+        this._tickFacility(delta)
+        break
+
+      case STATES.LAUNCH:
+        this._tickLaunch(delta)
+        break
+    }
+
+    particles.update(delta)
+    physics.step(delta)
+  }
+
+  _tickMenu(delta) {
+    // Slow cinematic camera drift
+    renderer.camera.position.x = Math.sin(this._menuTime * 0.08) * 3
+    renderer.camera.position.y = 5 + Math.sin(this._menuTime * 0.05) * 0.5
+    renderer.camera.lookAt(0, 3, 0)
+
+    // Rotate earth / orbit ring
+    const { earthSphere, earthWire, orbitRing, sat } = this._sceneData
+    if (earthSphere) {
+      earthSphere.rotation.y += delta * 0.1
+      earthWire.rotation.y   -= delta * 0.05
+      orbitRing.rotation.z   += delta * 0.3
+    }
+    if (sat) {
+      sat.userData.orbitEarth.angle += delta * 0.8
+      const { radius, angle } = sat.userData.orbitEarth
+      sat.position.set(
+        earthSphere.position.x + Math.cos(angle) * radius,
+        earthSphere.position.y,
+        earthSphere.position.z + Math.sin(angle) * radius
+      )
+    }
+  }
+
+  _tickHangar(delta) {
+    // Slow rocket display rotation
+    if (this._rocket) this._rocket.rotation.y += delta * 0.15
+
+    // Camera orbit for dramatic display
+    renderer.camera.position.x = Math.sin(this._menuTime * 0.2) * 10
+    renderer.camera.position.z = Math.cos(this._menuTime * 0.2) * 10
+    renderer.camera.position.y = 8 + Math.sin(this._menuTime * 0.1) * 2
+    renderer.camera.lookAt(0, 10, 0)
+
+    // Animate engineering core and warning lights
+    if (this._rocket) {
+      this._rocket.traverse(obj => {
+        if (obj.userData.isCore) {
+          obj.material.emissiveIntensity = 1.5 + Math.sin(this._menuTime * 3) * 0.5
+        }
+        if (obj.userData.isWarning) {
+          obj.material.emissiveIntensity = Math.floor(this._warningFlash * 2) % 2 === 0 ? 1.5 : 0.1
+        }
+      })
+    }
+  }
+
+  _tickFacility(delta) {
+    if (!this._character) return
+
+    const deck = this._character.update(delta, renderer.camera)
+
+    // Animate rocket interior
+    if (this._rocket) {
+      this._rocket.traverse(obj => {
+        if (obj.userData.isCore) {
+          obj.material.emissiveIntensity = 1.5 + Math.sin(this._menuTime * 3) * 0.5
+          obj.rotation.y += delta * 0.5
+        }
+        if (obj.userData.isWarning) {
+          obj.material.emissiveIntensity = Math.floor(this._warningFlash * 2) % 2 === 0 ? 1.5 : 0.1
+        }
+      })
+    }
+
+    // Broadcast position to UI
+    const pos = this._character.mesh.position
+    this._uiCallback?.(STATES.FACILITY, {
+      position: { x: pos.x, y: pos.y, z: pos.z },
+      insideRocket: this._character.insideRocket,
+      deckName: this._character.insideRocket ? (this._character.currentDeck >= 0 ? null : 'BOARDING...') : null
+    })
+  }
+
+  _tickLaunch(delta) {
+    if (!this._launch) return
+    this._launch.update(
+      delta,
+      (count) => this._uiCallback?.(STATES.LAUNCH, { countdown: count }),
+      (status) => this._uiCallback?.(STATES.LAUNCH, { launchStatus: status })
+    )
+    // Animate warning lights during launch
+    if (this._rocket) {
+      this._rocket.traverse(obj => {
+        if (obj.userData.isWarning) {
+          obj.material.emissiveIntensity = Math.floor(this._warningFlash * 4) % 2 === 0 ? 2 : 0
+        }
+      })
+    }
+  }
+
+  startLaunch() {
+    if (this.state === STATES.FACILITY) {
+      this.transition(STATES.LAUNCH)
+    }
+  }
+
+  returnToMenu() {
+    this.transition(STATES.MAIN_MENU)
+  }
+}
+
+export const game = new Game()

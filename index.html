@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Rocket Builder Simulator</title>
+    <meta name="description" content="Design, build, and launch your own rockets in this immersive 3D browser-based space simulator. Inspired by NASA, SpaceX, and the spirit of exploration." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- CSS-only loading spinner — visible until React mounts and hides it -->
+    <div id="loading-screen">
+      <div class="loading-logo">
+        <div class="loading-ring"></div>
+        <div class="loading-ring loading-ring--2"></div>
+        <div class="loading-ring loading-ring--3"></div>
+        <span class="loading-text">INITIALIZING SYSTEMS</span>
+        <div class="loading-bar-wrap"><div class="loading-bar-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Three.js canvas — behind React UI -->
+    <canvas id="three-canvas"></canvas>
+
+    <!-- React UI root — layered on top -->
+    <div id="root"></div>
+
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
