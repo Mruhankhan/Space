@@ -1,8 +1,27 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import { sound } from '../sound.js'
 
 export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket }) {
   const pos = position || { x: 0, y: 0, z: 0 }
+  const lastTouchAction = useRef(0)
+
+  function runAction(action) {
+    sound.play('click')
+    action?.()
+  }
+
+  function handleTouchAction(event, action) {
+    if (event.pointerType !== 'touch') return
+    event.preventDefault()
+    lastTouchAction.current = performance.now()
+    runAction(action)
+  }
+
+  function handleClickAction(action) {
+    if (performance.now() - lastTouchAction.current < 500) return
+    runAction(action)
+  }
+
   return (
     <div className="hud">
       {/* Top-left status */}
@@ -55,18 +74,19 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
             <div className="control-row"><span className="key">W A S D</span><span>Move</span></div>
             <div className="control-row"><span className="key">Space</span><span>Jump</span></div>
             <div className="control-row"><span className="key">Shift</span><span>Sprint</span></div>
-            <div className="control-row"><span className="key">E</span><span>Interact</span></div>
+            <div className="control-row"><span className="key">E</span><span>{insideRocket ? 'Deck / exit' : 'Board rocket'}</span></div>
             <div className="control-row"><span className="key">Click</span><span>Look</span></div>
             <div className="control-row"><span className="key">Esc</span><span>Pause</span></div>
           </div>
         </div>
 
         {/* Action buttons */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'auto', alignItems: 'flex-end' }}>
+        <div className="hud-actions">
           <button
             id="hud-launch-btn"
             className="btn btn-amber"
-            onClick={() => { sound.play('click'); onLaunch?.() }}
+            onPointerUp={(e) => handleTouchAction(e, onLaunch)}
+            onClick={() => handleClickAction(onLaunch)}
             title="Initiate launch sequence"
           >
             🔥 Launch Sequence
@@ -74,7 +94,8 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
           <button
             id="hud-exit-btn"
             className="btn btn-secondary"
-            onClick={() => { sound.play('click'); onExitToMenu?.() }}
+            onPointerUp={(e) => handleTouchAction(e, onExitToMenu)}
+            onClick={() => handleClickAction(onExitToMenu)}
           >
             ← Exit to Menu
           </button>

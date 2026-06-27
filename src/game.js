@@ -31,6 +31,8 @@ class Game {
     this._launch     = null
     this._menuTime   = 0
     this._warningFlash = 0
+    this._facilityUiTimer = 0
+    this._animatedRocketParts = { cores: [], warnings: [] }
   }
 
   // ── Initialization ─────────────────────────────────────────
@@ -72,17 +74,18 @@ class Game {
 
       case STATES.HANGAR: {
         renderer.clearScene()
-        renderer.setFog(0x030810, 0.025)
+        renderer.setFog(0x06111d, 0.012)
         buildHangarScene(renderer.scene)
         const rockets = getRockets()
         const rocketConfig = payload.rocket || rockets[0]
         this._rocket = buildRocket(rocketConfig)
         this._rocket.position.set(0, 0.2, 0)
         renderer.scene.add(this._rocket)
+        this._cacheRocketAnimations()
         input.disable()
         sound.setAmbient('hangar')
-        renderer.camera.position.set(6, 8, 14)
-        renderer.camera.lookAt(0, 10, 0)
+        renderer.camera.position.set(5, 9, 22)
+        renderer.camera.lookAt(0, 9.5, 0)
         break
       }
 
@@ -101,6 +104,8 @@ class Game {
         this._rocket = buildRocket(rocketConfig)
         this._rocket.position.set(0, 0.3, 0)
         renderer.scene.add(this._rocket)
+        this._cacheRocketAnimations()
+        this._registerRocketColliders()
         physics.addStatic(this._sceneData.ground)
 
         this._character = new Character(renderer.scene)
@@ -134,9 +139,12 @@ class Game {
   }
 
   _cleanupState(prev) {
-    if (prev === STATES.FACILITY || prev === STATES.LAUNCH) {
+    if (prev === STATES.HANGAR || prev === STATES.FACILITY || prev === STATES.LAUNCH) {
       if (this._character) { this._character.dispose(); this._character = null }
       if (this._rocket)    { renderer.scene.remove(this._rocket); this._rocket = null }
+      this._animatedRocketParts = { cores: [], warnings: [] }
+    }
+    if (prev === STATES.FACILITY || prev === STATES.LAUNCH) {
       particles.stop()
       input.exitPointerLock()
     }
@@ -153,6 +161,22 @@ class Game {
 
   // ── UI callback registration ───────────────────────────────
   onUIUpdate(cb) { this._uiCallback = cb }
+
+  _cacheRocketAnimations() {
+    const cores = []
+    const warnings = []
+    this._rocket?.traverse(obj => {
+      if (obj.userData.isCore && obj.material) cores.push(obj)
+      if (obj.userData.isWarning && obj.material) warnings.push(obj)
+    })
+    this._animatedRocketParts = { cores, warnings }
+  }
+
+  _registerRocketColliders() {
+    this._rocket?.traverse(obj => {
+      if (obj.userData.isInteriorFloor) physics.addStatic(obj)
+    })
+  }
 
   // ── Game loop tick ─────────────────────────────────────────
   _tick(delta) {
@@ -211,22 +235,13 @@ class Game {
     if (this._rocket) this._rocket.rotation.y += delta * 0.15
 
     // Camera orbit for dramatic display
-    renderer.camera.position.x = Math.sin(this._menuTime * 0.2) * 10
-    renderer.camera.position.z = Math.cos(this._menuTime * 0.2) * 10
-    renderer.camera.position.y = 8 + Math.sin(this._menuTime * 0.1) * 2
-    renderer.camera.lookAt(0, 10, 0)
+    renderer.camera.position.x = 5 + Math.sin(this._menuTime * 0.16) * 2.5
+    renderer.camera.position.z = 22 + Math.cos(this._menuTime * 0.16) * 2
+    renderer.camera.position.y = 9 + Math.sin(this._menuTime * 0.1) * 0.8
+    renderer.camera.lookAt(0, 9.5, 0)
 
     // Animate engineering core and warning lights
-    if (this._rocket) {
-      this._rocket.traverse(obj => {
-        if (obj.userData.isCore) {
-          obj.material.emissiveIntensity = 1.5 + Math.sin(this._menuTime * 3) * 0.5
-        }
-        if (obj.userData.isWarning) {
-          obj.material.emissiveIntensity = Math.floor(this._warningFlash * 2) % 2 === 0 ? 1.5 : 0.1
-        }
-      })
-    }
+    this._animateRocketLights(delta, false)
   }
 
   _tickFacility(delta) {
@@ -235,19 +250,12 @@ class Game {
     const deck = this._character.update(delta, renderer.camera)
 
     // Animate rocket interior
-    if (this._rocket) {
-      this._rocket.traverse(obj => {
-        if (obj.userData.isCore) {
-          obj.material.emissiveIntensity = 1.5 + Math.sin(this._menuTime * 3) * 0.5
-          obj.rotation.y += delta * 0.5
-        }
-        if (obj.userData.isWarning) {
-          obj.material.emissiveIntensity = Math.floor(this._warningFlash * 2) % 2 === 0 ? 1.5 : 0.1
-        }
-      })
-    }
+    this._animateRocketLights(delta, true)
 
-    // Broadcast position to UI
+    // Broadcast position to UI at 8Hz instead of every animation frame.
+    this._facilityUiTimer += delta
+    if (this._facilityUiTimer < 0.125) return
+    this._facilityUiTimer = 0
     const pos = this._character.mesh.position
     this._uiCallback?.(STATES.FACILITY, {
       position: { x: pos.x, y: pos.y, z: pos.z },
@@ -264,12 +272,20 @@ class Game {
       (status) => this._uiCallback?.(STATES.LAUNCH, { launchStatus: status })
     )
     // Animate warning lights during launch
-    if (this._rocket) {
-      this._rocket.traverse(obj => {
-        if (obj.userData.isWarning) {
-          obj.material.emissiveIntensity = Math.floor(this._warningFlash * 4) % 2 === 0 ? 2 : 0
-        }
-      })
+    for (const obj of this._animatedRocketParts.warnings) {
+      obj.material.emissiveIntensity = Math.floor(this._warningFlash * 4) % 2 === 0 ? 2 : 0
+    }
+  }
+
+  _animateRocketLights(delta, rotateCore) {
+    const corePulse = 1.5 + Math.sin(this._menuTime * 3) * 0.5
+    const warningPulse = Math.floor(this._warningFlash * 2) % 2 === 0 ? 1.5 : 0.1
+    for (const obj of this._animatedRocketParts.cores) {
+      obj.material.emissiveIntensity = corePulse
+      if (rotateCore) obj.rotation.y += delta * 0.5
+    }
+    for (const obj of this._animatedRocketParts.warnings) {
+      obj.material.emissiveIntensity = warningPulse
     }
   }
 
@@ -277,6 +293,15 @@ class Game {
     if (this.state === STATES.FACILITY) {
       this.transition(STATES.LAUNCH)
     }
+  }
+
+  previewRocket(config) {
+    if (this.state !== STATES.HANGAR || !config) return
+    if (this._rocket) renderer.scene.remove(this._rocket)
+    this._rocket = buildRocket(config)
+    this._rocket.position.set(0, 0.2, 0)
+    renderer.scene.add(this._rocket)
+    this._cacheRocketAnimations()
   }
 
   returnToMenu() {

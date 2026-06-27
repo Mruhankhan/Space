@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { physics } from './physics.js'
 
 // ── Shared Materials ───────────────────────────────────────
-const concreteMat = () => new THREE.MeshStandardMaterial({ color: 0x6e7a82, roughness: 0.95, metalness: 0.05 })
+const concreteMat = () => new THREE.MeshStandardMaterial({ color: 0x87919a, roughness: 0.9, metalness: 0.04 })
 const metalMat    = (c = 0x445566) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.8 })
 const glowMat     = (c, e) => new THREE.MeshStandardMaterial({ color: c, emissive: e, emissiveIntensity: 1.2, roughness: 0.5 })
 const glassMat    = () => new THREE.MeshStandardMaterial({ color: 0x88aacc, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.3 })
@@ -14,7 +14,7 @@ function makeSun(scene, y = 60, color = 0xfff0d0, intensity = 1.6) {
   const sun = new THREE.DirectionalLight(color, intensity)
   sun.position.set(40, y, 30)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.mapSize.set(1024, 1024)
   sun.shadow.camera.near = 0.5
   sun.shadow.camera.far = 400
   sun.shadow.camera.left = sun.shadow.camera.bottom = -80
@@ -33,7 +33,7 @@ function makePoint(scene, color, intensity, pos, dist) {
 
 // ── Starfield ──────────────────────────────────────────────
 function makeStars(scene) {
-  const count = 3000
+  const count = 1400
   const pos = new Float32Array(count * 3)
   for (let i = 0; i < count; i++) {
     const theta = Math.random() * Math.PI * 2
@@ -45,7 +45,7 @@ function makeStars(scene) {
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, sizeAttenuation: true })
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.75, sizeAttenuation: true })
   scene.add(new THREE.Points(geo, mat))
 }
 
@@ -171,13 +171,13 @@ export function buildMenuScene(scene) {
 //  HANGAR SCENE
 // ─────────────────────────────────────────────────────────────
 export function buildHangarScene(scene) {
-  scene.background = new THREE.Color(0x030810)
-  scene.fog = new THREE.FogExp2(0x030810, 0.025)
+  scene.background = new THREE.Color(0x06111d)
+  scene.fog = new THREE.FogExp2(0x06111d, 0.012)
 
   // Floor
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(50, 50),
-    new THREE.MeshStandardMaterial({ color: 0x060f1a, roughness: 0.8, metalness: 0.5 })
+      new THREE.MeshStandardMaterial({ color: 0x101a24, roughness: 0.72, metalness: 0.42 })
   )
   floor.rotation.x = -Math.PI / 2
   floor.receiveShadow = true
@@ -204,10 +204,10 @@ export function buildHangarScene(scene) {
   // Overhead floodlights
   for (let a = 0; a < 4; a++) {
     const angle = (a / 4) * Math.PI * 2
-    const flood = new THREE.SpotLight(0xfff0e0, 2.0, 30, Math.PI / 6, 0.3)
+    const flood = new THREE.SpotLight(0xfff0e0, 1.6, 34, Math.PI / 5, 0.35)
     flood.position.set(Math.sin(angle) * 8, 12, Math.cos(angle) * 8)
     flood.target.position.set(0, 0, 0)
-    flood.castShadow = true
+    flood.castShadow = a === 0
     scene.add(flood)
     scene.add(flood.target)
   }
@@ -229,7 +229,13 @@ export function buildHangarScene(scene) {
     }
   }
 
-  scene.add(new THREE.AmbientLight(0x0a1628, 0.6))
+  scene.add(new THREE.HemisphereLight(0xd9ecff, 0x1d3040, 0.9))
+  scene.add(new THREE.AmbientLight(0x21364a, 0.85))
+  const front = new THREE.DirectionalLight(0xffffff, 1.6)
+  front.position.set(5, 12, 18)
+  scene.add(front)
+  makePoint(scene, 0x79e7ff, 0.9, [0, 9, 10], 26)
+  makePoint(scene, 0xffb64d, 0.55, [-6, 5, 8], 18)
   makeStars(scene)
 }
 
@@ -237,15 +243,15 @@ export function buildHangarScene(scene) {
 //  TEST FACILITY SCENE — Full launch complex
 // ─────────────────────────────────────────────────────────────
 export function buildFacilityScene(scene) {
-  scene.background = new THREE.Color(0x04111e)
-  scene.fog = new THREE.FogExp2(0x04111e, 0.012)
+  scene.background = new THREE.Color(0x061728)
+  scene.fog = new THREE.FogExp2(0x061728, 0.007)
 
   const objs = { collidables: [] }
 
   // ── Ground plane ──
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(400, 400, 80, 80),
-    new THREE.MeshStandardMaterial({ color: 0x2a3520, roughness: 1.0, metalness: 0.0 })
+    new THREE.PlaneGeometry(400, 400, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0x345035, roughness: 1.0, metalness: 0.0 })
   )
   ground.rotation.x = -Math.PI / 2
   ground.receiveShadow = true
@@ -297,7 +303,7 @@ export function buildFacilityScene(scene) {
   for (let y = 0; y <= 50; y += 6) {
     const platform = new THREE.Mesh(
       new THREE.BoxGeometry(5, 0.2, 5),
-      metalMat(0x334455)
+      metalMat(0x586b78)
     )
     platform.position.set(towerX, y, 0)
     platform.castShadow = true
@@ -309,7 +315,7 @@ export function buildFacilityScene(scene) {
   // Swing arm at top
   const arm = new THREE.Mesh(
     new THREE.BoxGeometry(12, 0.3, 1.0),
-    metalMat(0x556677)
+    metalMat(0x7890a0)
   )
   arm.position.set(towerX + 4, 48, 0)
   scene.add(arm)
@@ -332,7 +338,7 @@ export function buildFacilityScene(scene) {
   // ── Mission Control Building ──
   const mcBase = new THREE.Mesh(
     new THREE.BoxGeometry(24, 8, 16),
-    concreteMat()
+    new THREE.MeshStandardMaterial({ color: 0x79848d, roughness: 0.86, metalness: 0.06 })
   )
   mcBase.position.set(-50, 4, -15)
   mcBase.castShadow = true
@@ -353,6 +359,13 @@ export function buildFacilityScene(scene) {
   // MC sign light
   makePoint(scene, 0xffaa44, 1.0, [-50, 9, -7], 20)
 
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(12, 1, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0x112238, emissive: 0x0aa7ff, emissiveIntensity: 0.55 })
+  )
+  sign.position.set(-50, 8.9, -6.88)
+  scene.add(sign)
+
   // MC roof antenna
   const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 6, 6), metalMat())
   antenna.position.set(-50, 11, -15)
@@ -365,7 +378,7 @@ export function buildFacilityScene(scene) {
   for (const [x, z, r, h] of [[10, -20, 3, 12], [20, -10, 2, 8], [15, -30, 2.5, 10]]) {
     const tank = new THREE.Mesh(
       new THREE.CylinderGeometry(r, r, h, 16),
-      new THREE.MeshStandardMaterial({ color: 0xaabbcc, roughness: 0.4, metalness: 0.7 })
+      new THREE.MeshStandardMaterial({ color: 0xd6e1e8, roughness: 0.35, metalness: 0.72 })
     )
     tank.position.set(x, h / 2, z)
     tank.castShadow = true
@@ -382,7 +395,7 @@ export function buildFacilityScene(scene) {
   }
 
   // ── Road to complex ──
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(12, 120), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 1 }))
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(12, 120), new THREE.MeshStandardMaterial({ color: 0x20242a, roughness: 0.95 }))
   road.rotation.x = -Math.PI / 2
   road.position.set(30, 0.01, 10)
   road.rotation.z = Math.PI * 0.15
@@ -390,11 +403,12 @@ export function buildFacilityScene(scene) {
 
   // ── Lighting ──
   makeSun(scene)
-  const moonLight = new THREE.DirectionalLight(0x3355aa, 0.3)
+  const moonLight = new THREE.DirectionalLight(0x668cff, 0.45)
   moonLight.position.set(-60, 40, -40)
   scene.add(moonLight)
 
-  scene.add(new THREE.AmbientLight(0x051020, 0.8))
+  scene.add(new THREE.HemisphereLight(0x9fbfff, 0x21381f, 0.85))
+  scene.add(new THREE.AmbientLight(0x102036, 0.45))
 
   // Floodlights around pad
   for (let i = 0; i < 4; i++) {
@@ -402,7 +416,7 @@ export function buildFacilityScene(scene) {
     const fl = new THREE.SpotLight(0xffeedd, 1.2, 80, Math.PI / 7, 0.4)
     fl.position.set(Math.sin(angle) * 24, 18, Math.cos(angle) * 24)
     fl.target.position.set(0, 0, 0)
-    fl.castShadow = true
+    fl.castShadow = false
     scene.add(fl); scene.add(fl.target)
   }
 

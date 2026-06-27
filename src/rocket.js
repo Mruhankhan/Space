@@ -134,6 +134,7 @@ function buildInterior(group) {
   // ── Cockpit Deck (y: 18–22) ──
   const cockpitFloor = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.15, 16), floorMat)
   cockpitFloor.position.y = 18.08
+  cockpitFloor.userData.isInteriorFloor = true
   group.add(cockpitFloor)
 
   // Pilot seat
@@ -174,6 +175,7 @@ function buildInterior(group) {
   // ── Crew Cabin Deck (y: 10–16) ──
   const cabinFloor = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.15, 16), floorMat)
   cabinFloor.position.y = 10.08
+  cabinFloor.userData.isInteriorFloor = true
   group.add(cabinFloor)
 
   // Terminal consoles (4 around wall)
@@ -207,6 +209,7 @@ function buildInterior(group) {
   // ── Engineering Deck (y: 3–9) ──
   const engFloor = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.15, 16), floorMat)
   engFloor.position.y = 3.08
+  engFloor.userData.isInteriorFloor = true
   group.add(engFloor)
 
   // Reactor core (glowing sphere)
