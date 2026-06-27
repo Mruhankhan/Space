@@ -49,7 +49,7 @@ class Game {
     console.log(`[game] ${this.state} → ${newState}`)
 
     // Cleanup previous state
-    this._cleanupState(this.state)
+    this._cleanupState(this.state, newState)
 
     this.state = newState
 
@@ -138,14 +138,20 @@ class Game {
     this._uiCallback?.(newState, payload)
   }
 
-  _cleanupState(prev) {
-    if (prev === STATES.HANGAR || prev === STATES.FACILITY || prev === STATES.LAUNCH) {
+  _cleanupState(prev, next) {
+    const keepRocketForLaunch = prev === STATES.FACILITY && next === STATES.LAUNCH
+
+    if (prev === STATES.FACILITY && this._character) {
       if (this._character) { this._character.dispose(); this._character = null }
+    }
+
+    if (!keepRocketForLaunch && (prev === STATES.HANGAR || prev === STATES.FACILITY || prev === STATES.LAUNCH)) {
       if (this._rocket)    { renderer.scene.remove(this._rocket); this._rocket = null }
       this._animatedRocketParts = { cores: [], warnings: [] }
     }
     if (prev === STATES.FACILITY || prev === STATES.LAUNCH) {
       particles.stop()
+      sound.play('stop_thruster')
       input.exitPointerLock()
     }
     if (prev === STATES.LAUNCH) {
