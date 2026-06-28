@@ -6,6 +6,14 @@ const _keys = new Set()
 const _pressed = new Set()
 let _enabled = true
 let _pointerLocked = false
+let _coarsePointer = false
+
+// Touch axes (driven by the on-screen joysticks).
+// Each is in [-1, 1] in (x: strafe, y: forward/back) space, same convention
+// as the keyboard axis. `_touchLook` is in normalised rad/s (used directly
+// in character.update; not converted to a delta accumulator).
+const _touchMove = { x: 0, y: 0 }
+const _touchLook = { x: 0, y: 0 }
 
 // Persistent mouse delta accumulator (mutated in place, never re-allocated).
 const _mouseDelta = { x: 0, y: 0 }
@@ -113,6 +121,16 @@ document.addEventListener('pointerlockchange', () => {
   _pointerLocked = document.pointerLockElement !== null
 })
 
+// Detect coarse-pointer (touch) devices once at load. Cached for the session.
+try {
+  if (typeof window.matchMedia === 'function') {
+    _coarsePointer = window.matchMedia('(pointer: coarse)').matches
+    window.matchMedia('(pointer: coarse)').addEventListener?.('change', e => {
+      _coarsePointer = e.matches
+    })
+  }
+} catch {}
+
 const _canvas = () => document.getElementById('three-canvas')
 
 _canvas()?.addEventListener?.('pointerdown', e => {
@@ -161,6 +179,7 @@ export const input = {
    * Movement axis in camera-relative space.
    * y < 0 = forward, y > 0 = back, x < 0 = left, x > 0 = right.
    * Returns a shared object (do not mutate / retain).
+   * Mixes keyboard + gamepad + touch joystick.
    */
   getMoveAxis() {
     if (!_enabled) { _moveAxis.x = 0; _moveAxis.y = 0; return _moveAxis }
@@ -177,15 +196,20 @@ export const input = {
       const len = Math.sqrt(x * x + y * y)
       if (len > 1) { x /= len; y /= len }
     }
+    // Mix in touch joystick (touch dominates when present so it overrides kb).
+    if (_touchMove.x !== 0 || _touchMove.y !== 0) {
+      x = _touchMove.x
+      y = _touchMove.y
+    }
     _moveAxis.x = x
     _moveAxis.y = y
     return _moveAxis
   },
 
-  /** Gamepad look axis (already deadzoned). */
+  /** Gamepad look axis (already deadzoned), mixed with touch look. */
   getLookAxis() {
-    _lookAxis.x = _gp.rightX * GAMEPAD_LOOK_GAIN
-    _lookAxis.y = _gp.rightY * GAMEPAD_LOOK_GAIN
+    _lookAxis.x = _gp.rightX * GAMEPAD_LOOK_GAIN + _touchLook.x
+    _lookAxis.y = _gp.rightY * GAMEPAD_LOOK_GAIN + _touchLook.y
     return _lookAxis
   },
 
@@ -216,13 +240,40 @@ export const input = {
   },
 
   requestPointerLock() {
-    if (document.pointerLockElement) return
+    if (_coarsePointer) return false
+    if (document.pointerLockElement) return true
     _canvas()?.requestPointerLock?.()
+    return true
   },
 
   exitPointerLock() {
     if (!document.pointerLockElement) return
     document.exitPointerLock?.()
+  },
+
+  /**
+   * Called by TouchJoystick. Channels: 'move' or 'look'.
+   * `x, y` are normalised in [-1, 1].
+   *  move: x = strafe, y = forward/back (same convention as keyboard)
+   *  look: x = yaw rate, y = pitch rate, scaled later in character.js
+   */
+  setTouchAxis(channel, x, y) {
+    if (channel === 'move') {
+      _touchMove.x = Math.max(-1, Math.min(1, x || 0))
+      _touchMove.y = Math.max(-1, Math.min(1, y || 0))
+    } else if (channel === 'look') {
+      _touchLook.x = Math.max(-1, Math.min(1, x || 0))
+      _touchLook.y = Math.max(-1, Math.min(1, y || 0))
+    }
+  },
+
+  clearTouchAxis() {
+    _touchMove.x = 0; _touchMove.y = 0
+    _touchLook.x = 0; _touchLook.y = 0
+  },
+
+  isCoarsePointer() {
+    return _coarsePointer
   },
 
   disable() {
@@ -231,6 +282,8 @@ export const input = {
     _pressed.clear()
     _mouseDelta.x = 0
     _mouseDelta.y = 0
+    _touchMove.x = 0; _touchMove.y = 0
+    _touchLook.x = 0; _touchLook.y = 0
   },
 
   enable() {

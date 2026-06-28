@@ -1,7 +1,16 @@
 import React, { memo, useRef, useCallback } from 'react'
 import { sound } from '../sound.js'
+import { input } from '../input.js'
+import TouchJoystick from './TouchJoystick.jsx'
 
-function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket, launchReady, consoleProgress }) {
+const ROCKET_POS = { x: 0, z: 0 }
+
+function HUD({
+  deck, position, onExitToMenu, onLaunch,
+  insideRocket, launchReady, consoleProgress,
+  forceTouch = false,
+  consoleActivated = null,
+}) {
   const pos = position || { x: 0, y: 0, z: 0 }
   const lastTouchAction = useRef(0)
 
@@ -22,8 +31,40 @@ function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket, launchReady
     runAction(action)
   }, [runAction])
 
+  const showTouch = forceTouch || input.isCoarsePointer()
+
+  // Compass: angle from player to rocket in world space, converted to
+  // camera-relative by subtracting the player's yaw.
+  // For a simple arrow we just rotate by the world-space delta angle
+  // (player rotates the camera, so the arrow stays world-fixed).
+  const dx = ROCKET_POS.x - pos.x
+  const dz = ROCKET_POS.z - pos.z
+  const worldAngle = Math.atan2(dx, -dz)  // 0 = north, increasing clockwise
+  const dist = Math.sqrt(dx * dx + dz * dz)
+  // Arrow shown only when outside and rocket is far enough to need pointing.
+  const showCompass = !insideRocket && dist > 4
+
   return (
     <div className="hud">
+      {/* Crosshair */}
+      <div className="crosshair" aria-hidden="true">
+        <div className="crosshair-ring" />
+        <div className="crosshair-dot" />
+      </div>
+
+      {/* Console flash overlay — quick cyan vignette when activated. */}
+      {consoleActivated && (
+        <div className="console-flash" key={consoleActivated + ':' + Date.now()} />
+      )}
+
+      {/* Touch joysticks */}
+      {showTouch && (
+        <div className="touch-controls">
+          <TouchJoystick side="left" channel="move" />
+          <TouchJoystick side="right" channel="look" />
+        </div>
+      )}
+
       <div className="hud-top">
         <div className="hud-panel">
           {insideRocket ? (
@@ -78,6 +119,27 @@ function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket, launchReady
             <div className="control-row"><span className="key">Esc</span><span>Pause</span></div>
           </div>
         </div>
+
+        {/* Rocket compass — small SVG arrow pointing at the rocket. */}
+        {showCompass && (
+          <div className="hud-panel rocket-compass" aria-hidden="true">
+            <div className="label-xs" style={{ marginBottom: 4 }}>Rocket</div>
+            <svg width="60" height="60" viewBox="-30 -30 60 60">
+              <circle cx="0" cy="0" r="26" fill="rgba(0,0,0,0.4)" stroke="var(--c-cyan)" strokeWidth="1" />
+              <g transform={`rotate(${(worldAngle * 180 / Math.PI).toFixed(1)})`}>
+                <polygon
+                  points="0,-18 8,8 0,4 -8,8"
+                  fill="var(--c-cyan)"
+                  stroke="var(--c-white)"
+                  strokeWidth="0.5"
+                />
+              </g>
+              <text x="0" y="36" textAnchor="middle" fill="var(--c-muted)" fontSize="7" fontFamily="var(--font-display)">
+                {Math.round(dist)}m
+              </text>
+            </svg>
+          </div>
+        )}
 
         <div className="hud-actions">
           <button

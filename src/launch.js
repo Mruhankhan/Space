@@ -1,22 +1,25 @@
 import { Vector3 } from 'three'
 import { particles } from './particles.js'
 import { sound } from './sound.js'
-import { addLogEntry } from './save.js'
+import { addLogEntry, addMissionResult } from './save.js'
+import { scoreMission } from './missions.js'
 
 const COUNTDOWN_FROM = 10
 
 export class Launch {
-  constructor(scene, camera, rocket, onComplete) {
+  constructor(scene, camera, rocket, onComplete, mission = null) {
     this.scene = scene
     this.camera = camera
     this.rocket = rocket
     this.onComplete = onComplete
+    this.mission = mission
 
-    this.state = 'idle' 
+    this.state = 'idle'
     this.countdown = COUNTDOWN_FROM
     this._elapsed = 0
     this._flightTime = 0
     this._maxAltitude = 0
+    this._peakVelocity = 0
     this._success = false
 
     this._origCamPos = camera.position.clone()
@@ -74,8 +77,11 @@ export class Launch {
       const templateBonus = this.config.template === 'saturnv' ? 1.4 : this.config.template === 'falcon9' ? 1.2 : 1.0
       const speedFactor = 4 + stageCount * 0.9 + templateBonus
       const altitude = Math.pow(this._flightTime, 2) * speedFactor
+      // Velocity = d(altitude)/dt = 2 * flightTime * speedFactor
+      const velocity = 2 * this._flightTime * speedFactor
       this.rocket.position.y = altitude
       this._maxAltitude = Math.max(this._maxAltitude, altitude)
+      this._peakVelocity = Math.max(this._peakVelocity, velocity)
 
       const camRadius = 40 + this._flightTime * 5
       const camAngle  = Math.PI * 0.3
@@ -110,18 +116,53 @@ export class Launch {
     particles.stopEngineFlare()
     if (!success) sound.play('error')
     else sound.play('success')
+    const altitude = Math.round(this._maxAltitude)
     addLogEntry({
       rocket: this.rocket.name || 'Unknown',
       success,
       message,
-      altitude: Math.round(this._maxAltitude),
+      altitude,
     })
+
+    // Mission scoring.
+    const result = { success, altitude, flightTime: this._flightTime, peakVelocity: this._peakVelocity, message }
+    const scored = this.mission
+      ? scoreMission(result, this.mission)
+      : { score: success ? 100 : 0, tier: success ? 'bronze' : 'fail', label: 'Flight Complete' }
+    if (this.mission) {
+      addMissionResult({
+        missionId: this.mission.id,
+        missionLabel: this.mission.label,
+        rocket: this.rocket.name || 'Unknown',
+        success,
+        score: scored.score,
+        tier: scored.tier,
+        altitude,
+      })
+    }
+
     setTimeout(() => {
       sound.setAmbient('facility')
-      this.onComplete({ success, altitude: Math.round(this._maxAltitude), message })
+      this.onComplete({
+        success,
+        altitude,
+        flightTime: this._flightTime,
+        peakVelocity: Math.round(this._peakVelocity),
+        message,
+        score: scored.score,
+        tier: scored.tier,
+        mission: this.mission,
+      })
     }, 3000)
   }
 
   isActive() { return this.state !== 'idle' }
-  getResult() { return { success: this._success, altitude: Math.round(this._maxAltitude) } }
+  getResult() {
+    return {
+      success: this._success,
+      altitude: Math.round(this._maxAltitude),
+      score: this._score,
+      tier: this._tier,
+    }
+  }
 }

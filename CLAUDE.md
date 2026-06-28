@@ -25,21 +25,22 @@ There is **no linter, no formatter, no type checker**. JS is plain `.js`, JSX is
 
 ```
 index.html
-  └─ <canvas id="three-canvas">    ← Three.js renders here, z-index 0
-  └─ <div id="root">               ← React UI overlays, z-index 10, pointer-events:none
+  ├─ <div id="loading-screen">       CSS-only spinner, removed once React mounts
+  ├─ <canvas id="three-canvas">      ← Three.js renders here, z-index 0
+  └─ <div id="root">                 ← React UI overlays, z-index 10, pointer-events:none
 
 src/main.jsx                       React entry → App
 src/App.jsx                        React state machine mirror; subscribes to game.onUIUpdate
 src/game.js                        The authoritative state machine + game loop
 src/renderer.js                    Three.js renderer/camera/scene/loop
-src/physics.js                     Custom AABB collision (no engine)
+src/physics.js                     Custom AABB + sphere-sweep collision (no engine)
 src/input.js                       Keyboard / mouse / pointer-lock / gamepad
-src/character.js                   Astronaut model + kinematic controller + camera
+src/character.js                   Astronaut capsule controller + instant third-person camera
 src/world.js                       buildMenuScene / buildHangarScene / buildFacilityScene
 src/rocket.js                      buildRocket(config) — exterior + interior geometry
 src/launch.js                      Launch sequence (countdown → flight → result)
 src/particles.js                   Three.Points particle systems (engine flare, smoke, sparks)
-src/sound.js                       Web Audio synth (no audio files)
+src/sound.js                       Web Audio synth (no audio files) + scene-based ambient
 src/save.js                        localStorage persistence (profile, rockets, log)
 src/ui/                            React components for each screen + HUD
 ```
@@ -48,92 +49,123 @@ src/ui/                            React components for each screen + HUD
 
 There are **two** state machines that must stay in sync:
 
-1. `game.state` in `src/game.js` — the source of truth. Transitions go through `game.transition(STATES.X, payload)`, which builds / clears scene + physics + audio + UI callbacks.
-2. React `screen` state in `src/App.jsx` — a mirror. `game.init()` registers `handleGameUpdate` via `game.onUIUpdate()` and React renders the matching component from `STATES`.
+1. `game.state` in `src/game.js` — the source of truth. Transitions go through `game.transition(STATES.X, payload)` (`src/game.js:79-171`), which builds / clears scene + physics + audio + UI callbacks and broadcasts the new state.
+2. React `screen` state in `src/App.jsx` — a mirror. `game.init()` registers `handleGameUpdate` via `game.onUIUpdate()` (`src/App.jsx:38-82`), and React renders the matching component from `STATES`.
 
-When changing state flow, update **both**: the switch in `src/game.js:88-176` and the render branches in `src/App.jsx:107-157`. There is no codegen or schema linking them — they are coupled by string constants in `STATES` (`src/game.js:14-21`).
+`App.handleGameUpdate` is **guarded** by `lastScreenRef` (`src/App.jsx:33, 38-42`) so it only calls `setScreen` on actual state transitions, not every tick. Facility and launch payload diffs (`src/App.jsx:43-81`) compare each field before cloning the state object, so React only re-renders when something visible actually changes.
 
-### The game loop (`src/game.js:235-272`)
+When changing state flow, update **both**: the switch in `src/game.js:79-171` and the render branches in `src/App.jsx:142-191`. There is no codegen or schema linking them — they are coupled by string constants in `STATES` (`src/game.js:17-24`).
 
-`renderer.startLoop(onTick)` (`src/renderer.js:62-73`) runs `requestAnimationFrame`, computes `delta`, calls `onTick(delta)` then `renderer.render`. Inside `onTick` (`_tick` in `game.js`), an accumulator drains at fixed `FIXED_TICK = 1/90` (`src/game.js:23`). Up to **22 fixed ticks per render frame** are possible at 30 FPS due to `MAX_ACCUMULATOR = 0.25` — this is a known issue documented in the architectural review.
+### The game loop (`src/game.js:198-221`, `src/renderer.js:111-129`)
 
-Per fixed tick the order is: state switch → particles.update → physics.step. **Camera update lives inside `Character.update` which is called from `_tickFacility`, so the camera runs at physics tick rate, not render rate** — this is the root cause of camera lag perception.
+`renderer.startLoop(onTick)` runs `requestAnimationFrame`, computes `delta` (clamped to 0.1s), calls `onTick(delta, time)` then `renderer.render`. Inside `onTick` (`_frame` in `game.js`):
+
+1. `input.update()` (`src/game.js:204`) — polls gamepad.
+2. State dispatch (`src/game.js:206-220`):
+   - `PROFILE | MAIN_MENU | HANGAR` → `_tickCinematic(delta)` — animations + scripted camera, no physics.
+   - `FACILITY` → `_tickFacility(delta)` — character update + physics + HUD broadcast.
+   - `LAUNCH` → `_tickLaunch(delta)` — countdown + flight.
+
+**There is no fixed-tick accumulator.** `_tickFacility` runs once per render frame with the actual `delta`. Physics is frame-time, not fixed-step. Camera update (`_character.applyCamera`) is called *before* movement inside `_tickFacility` (`src/game.js:257-258`), so it is frame-aligned with mouse delta.
 
 ### Coordinate systems
 
-- **Facility scene world coordinates**: launchpad at origin (0,0,0), rocket at (0, 0.3, 0). Player starts at (8, 2, 8).
-- **Rocket interior is local**: when `insideRocket === true`, position is in rocket-local coordinates. The astronaut teleports to deck heights `[3.25, 10.25, 18.25]` (`src/character.js:28`). The rocket exterior is built at world origin; if the rocket ever moves, interior logic must follow.
-- **Deck detection**: by `mesh.position.y` thresholds in `getDeckForY` (`src/rocket.js:321-325`).
+- **Facility scene world coordinates**: launchpad at origin (0,0,0), rocket at (0, 0.3, 0). Player starts at (8, 1, 8) (`src/game.js:139`).
+- **Rocket interior is local**: when `insideRocket === true`, position is in rocket-local coordinates. The astronaut teleports to deck heights `DECK_HEIGHTS = [3.25, 10.25, 18.25]` (`src/character.js:38`). The rocket exterior is built at world origin; if the rocket ever moves, interior logic must follow.
+- **Deck detection**: by `mesh.position.y` thresholds in `getDeckForY` (`src/rocket.js:384`).
+- **Camera**: `rotation.order = 'YXZ'` (`src/renderer.js:57`, `src/character.js:338`) — yaw applied first, then pitch directly via `camera.rotation.x`.
 
 ### Userdata tag conventions
 
-`Object3D.userData` is the backbone of cross-module communication — no scene graph events, no observer pattern.
+`Object3D.userData` is the backbone of cross-module communication — no scene graph events, no observer pattern. There is also a small `Character.on(name, fn)` event bus (`src/character.js:157-171`) used for `'deck'` and `'console'` events (`src/game.js:140-145`).
 
-| Tag | Set in | Read in |
-|-----|--------|---------|
-| `isRocketShell` | `src/rocket.js:28` | `src/game.js:227` (collision) |
-| `ignoreWhenInside` | `src/rocket.js:29` | `src/physics.js:32` (skip shell when inside) |
-| `isInteriorFloor` | `src/rocket.js:165,206,250` | `src/game.js:227` (collision) |
-| `isConsole` + `consoleId` | `src/rocket.js:217,230` | `src/game.js:48-67` (launch gating), `src/character.js:308-321` (interact) |
-| `isCore` | `src/rocket.js:260` | `src/game.js:218-223` (pulse animation) |
-| `isWarning` | `src/rocket.js:286` | `src/game.js:219,343-346` (strobe) |
-| `isTrigger` + `triggerType` | `src/rocket.js:313-314` | currently unused — dead code |
-| `persistent` | `src/renderer.js:46` | `src/renderer.js:83` (clearScene keeps) |
-| `orbitEarth` | `src/world.js:112` | `src/game.js:288-294` |
+| Tag | Purpose | Read in |
+|-----|---------|---------|
+| `isRocketShell` | Exterior rocket geometry collider | collision in `src/character.js` via `physics` |
+| `ignoreWhenInside` | Skip when player is inside rocket | sphere sweeps in `src/physics.js` |
+| `isInteriorFloor` | Walkable floor inside rocket | same |
+| `isConsole` + `consoleId` | Launch-gating interactable | `src/game.js:143-145, 310-340` + `Character._tryActivateConsole` |
+| `isCore` | Animated emissive core | `src/game.js:297-307` (pulse + rotate) |
+| `isWarning` | Strobe light | `src/game.js:298, 304` + `_tickLaunch` strobe |
+| `isTrigger` + `triggerType` | (dead code — unused) | — |
+| `persistent` | Survives `clearScene` | `src/renderer.js` PERSISTENT set |
+| `orbitEarth` | Animates with menu earth | `src/game.js` cinematic |
 
 ### Physics model
 
-`src/physics.js` is **not** a physics engine. It is a flat array of AABBs with a single-point overlap test. The character moves kinematically (`characterMove` does `position += velocity * dt`, then revert-if-overlap). There is no rotation, no forces, no continuous collision detection, no wall-normal response (so the player snaps instead of slides).
+`src/physics.js` is **not** a physics engine. It is a flat array of AABBs registered via `physics.addStatic(mesh, {tag})` plus a **capsule sphere-sweep** character controller (`characterMove`, `src/physics.js:78`). The capsule does:
 
-Colliders are registered by traversing the scene in `src/game.js:131-133, 142, 225-231` and pushing into `physics._staticBoxes` (private to `physics.js`). The rocket shell is excluded when the player is inside via `ignoreWhenInside`.
+- Independent X / Z / Y slide sweeps against all static AABBs (`_sphereSlideAxis`).
+- A slope-step retry on horizontal slide failure (`_tryStepUp`).
+- A ground probe (`_groundProbe`) for snap-to-floor after falls.
+- `ignoreWhenInside` is honored for all sweeps so the rocket shell does not trap the player.
+
+There is still **no rotation, no continuous CCD for non-capsule objects, and no wall-normal response** (sliding on each axis independently is the sliding response). The character moves kinematically and is gravity-affected (`GRAVITY = -22.0`, `src/character.js:26`).
+
+Colliders are registered during the FACILITY transition by traversing `this._sceneData.floors / .boxes` plus the rocket tree (`src/game.js:122-135, 353`).
 
 ### Asset loading
 
-There are **no external assets**. Every mesh is procedural Three.js primitives in `src/world.js` and `src/rocket.js`. Every sound is synthesized in `src/sound.js` via Web Audio (oscillators + noise + filters). The only network resource is the Google Fonts stylesheet in `index.html:11` (Orbitron + Inter) — bundled into the page at first load.
+There are **no external assets**. Every mesh is procedural Three.js primitives in `src/world.js` and `src/rocket.js`. Every sound is synthesized in `src/sound.js` via Web Audio (oscillators + noise + filters). The only network resource is the Google Fonts stylesheet in `index.html:11` (Orbitron + Inter) — bundled into the page at first load. The favicon is an inline SVG (`index.html:8`).
 
-State persistence uses `localStorage` keys `srbs_profile`, `srbs_rockets`, `srbs_log` (`src/save.js:3-7`).
+State persistence uses `localStorage` keys `srbs_profile`, `srbs_rockets`, `srbs_log` (`src/save.js:3-7`). `getRockets()` re-parses localStorage on every call (no cache); same for `getLog()`.
 
 ### Camera
 
-Currently embedded inside `src/character.js:144-264`. It is a third-person follow camera with:
-- Mouse delta × 0.005 rad/px sensitivity (`src/character.js:156-157`).
-- Lerp-based smoothing at `CAM_SMOOTHING = 10` (`src/character.js:25, 260`) — this is the dominant source of perceived camera lag.
-- A pitch formula that is geometrically incorrect (`src/character.js:253-257`) — see the architectural review.
+Lives in `src/character.js:308-341`. Third-person follow camera:
 
-When extracting the camera to its own module (planned refactor), keep this file as the source until extracted — do not write a parallel camera implementation.
+- **Instant**: no lerp. `applyCamera` is called before `update` in `_tickFacility` so it is frame-aligned with mouse delta.
+- Mouse delta × `MOUSE_SENS = 0.0024` rad/px (`src/character.js:31`); gamepad `PAD_SENS = 0.045` rad/s.
+- Yaw stored in `this._yaw` and applied via `camera.rotation.y`. Pitch stored in `this._pitch`, clamped to `[MIN_PITCH=-1.30, MAX_PITCH=1.30]` (`src/character.js:35-36`), applied via `camera.rotation.x` with `rotation.order = 'YXZ'`.
+- `lookAt` is computed in `applyCamera` (`src/character.js:328-340`) for the look-vector math; then the rotation is overridden so both yaw and pitch work correctly.
+
+When extracting the camera to its own module, keep `character.js` as the source until extracted — do not write a parallel camera implementation.
 
 ### UI broadcasts
 
-`game._uiCallback` (`src/game.js:29`) is invoked with `(state, payload)`. The handler in `src/App.jsx:19-40` **always** calls `setScreen(state)` even when state is unchanged, which triggers a full React reconciliation. The facility position broadcast is throttled to 8 Hz (`src/game.js:321-333`). When fixing this, gate `setScreen` on a ref comparison — do not remove the broadcast entirely, as the deck/console state still needs to flow.
+`game._uiCallback` (`src/game.js`) is invoked with `(state, payload)`. The handler in `src/App.jsx:38-82`:
+
+- Gates `setScreen` on `lastScreenRef.current !== state`.
+- For `FACILITY`, diffs `position`, `deckName`, `insideRocket`, `launchReady`, `consoleProgress` before cloning state.
+- For `LAUNCH`, diffs `countdown`, `launchStatus`, `result`.
+
+The facility position broadcast is throttled to **6 Hz** (`HUD_POSITION_HZ = 6`, `src/game.js:27-28`).
 
 ### Pointer lock
 
-`input.requestPointerLock()` is called from `src/game.js:159` when entering FACILITY and from a `pointerdown` handler in `src/input.js:138-142`. While locked, `mousemove` accumulates `e.movementX/Y` into `_mouseDelta`, consumed by `Character.update` once per call. To exit: Escape (browser default) or `input.exitPointerLock()` (`src/game.js:199`).
+`input.requestPointerLock()` is called from `src/game.js:149` when entering FACILITY and from a `pointerdown` handler in `src/input.js:118-124`. While locked, `mousemove` accumulates `e.movementX/Y` into `_mouseDelta` (`src/input.js:11, 88-89`), consumed once per frame by `Character.update` via `consumeMouseDelta()` (returns a shared buffer, no per-frame allocation). To exit: Escape (browser default) or `input.exitPointerLock()` (`src/game.js:191`).
+
+### Input enable/disable
+
+`input.enable()` and `input.disable()` gate keyboard, mouse, gamepad polling. UI screens call `input.disable()`; the FACILITY scene calls `input.enable()` (`src/game.js:84, 96, 109, 147, 161`). When adding new screens, gate input the same way.
+
+### Sound
+
+`sound.setAmbient(scene)` picks a looping ambient track (`'menu' | 'hangar' | 'facility'`) called from each transition case (`src/game.js:85, 96, 110, 148`). One-shots are added by extending the switch in `src/sound.js`. Audio context only unlocks after a user gesture — `sound.resume()` is called from UI click handlers (`src/ui/MainMenu.jsx:44`, `src/ui/ProfileScreen.jsx:28`).
 
 ## Working in this codebase
 
-- **Edit strings as constants, not magic literals.** `STATES` is the canonical state enum (`src/game.js:14`). Rocket templates use string discriminators: `'falcon9' | 'saturnv' | 'custom'` (`src/rocket.js:105`, `src/launch.js:74, 90`).
-- **Match factory function style.** Both `src/world.js` and `src/rocket.js` use `function metalMat(color, roughness, metalness)` and similar — call them where materials are needed; do not import a single shared material instance (none exist yet).
+- **Edit strings as constants, not magic literals.** `STATES` is the canonical state enum (`src/game.js:17`). Rocket templates use string discriminators: `'falcon9' | 'saturnv' | 'custom'` (`src/rocket.js`, `src/launch.js`).
+- **Match factory function style.** Both `src/world.js` and `src/rocket.js` use `function metalMat(color, roughness, metalness)` and similar — call them where materials are needed. Procedural astronaut materials are cached in `getAstronautMaterials` (`src/character.js:41-52`) and shared — do not duplicate.
+- **Starfield is cached** in `getStars()` (`src/world.js:60-77`); do not rebuild it per scene transition.
 - **New screens go in `src/ui/`** and are wired into `src/App.jsx`'s render block. Pass handlers down — do not reach into `game` directly from UI components.
-- **New interactive world objects** need: a `userData` tag in their builder, a collision entry (if static) in `src/game.js:225-231`, and a usage site that traverses with `obj.traverse`.
-- **Sound effects** are added by extending the switch in `src/sound.js:122-131`. Audio context only unlocks after a user gesture (`sound.resume`).
+- **New interactive world objects** need: a `userData` tag in their builder, a collision entry (if static) added in the FACILITY transition, and a usage site that traverses with `obj.traverse`.
+- **Sound effects** are added by extending the switch in `src/sound.js`. Audio context only unlocks after a user gesture (`sound.resume`).
 - **No network calls.** Do not introduce `fetch` or XHR without explicit reason; persistence is `localStorage` only.
 
 ## Known perf / feel issues (from prior architectural review)
 
-These are pre-identified and should not be re-investigated unless the task explicitly asks:
+These are pre-identified and should not be re-investigated unless the task explicitly asks. Items that have already been resolved are noted as such.
 
-- Camera smoothing at `CAM_SMOOTHING = 10` causes persistent lag (`src/character.js:25, 260`).
-- Mouse sensitivity 0.005 rad/px is low for the look feel the user wants (`src/character.js:156-157`).
-- Pitch geometry formula does not actually pitch the camera (`src/character.js:253-257`).
-- Up to 22 fixed ticks per render frame is allowed (`src/game.js:24, 241`).
-- `physics.characterMove` does 3 substeps × up-to-22 ticks × per-render-frame = up to ~67 collision tests per player frame (`src/physics.js:50`).
-- `clearScene` disposes every non-persistent material on every state transition (`src/renderer.js:80-91`) — first-frame jank after transitions.
-- No frustum culling, LOD, instancing, or material caching anywhere in `src/`.
-- `App.handleGameUpdate` calls `setScreen` unconditionally (`src/App.jsx:19-40`).
-- Mouse delta is cloned every frame via spread (`src/input.js:117-122`).
-- Star geometry is rebuilt on every scene transition (`src/world.js:36-50`).
-- React components are not memoized; HUD re-renders fully 8 Hz.
-- `getRockets()` re-parses localStorage on every call (`src/save.js:52-57`, called from `src/game.js:111` and `src/ui/HangarScreen.jsx:23`).
+- ~~Camera smoothing at `CAM_SMOOTHING = 10`~~ — **resolved**, camera is now instant.
+- ~~Mouse sensitivity 0.005 rad/px~~ — **resolved**, now `0.0024` (`src/character.js:31`).
+- ~~Pitch geometry formula does not actually pitch the camera~~ — **resolved**, uses `rotation.order = 'YXZ'` with `camera.rotation.x = this._pitch`.
+- ~~Up to 22 fixed ticks per render frame~~ — **resolved**, there is no fixed-tick accumulator; `_tickFacility` runs once per render frame with real delta.
+- ~~Mouse delta is cloned every frame via spread~~ — **resolved**, `consumeMouseDelta` returns a shared buffer.
+- ~~Star geometry is rebuilt on every scene transition~~ — **resolved**, `getStars()` caches the geometry.
+- ~~`App.handleGameUpdate` calls `setScreen` unconditionally~~ — **resolved**, guarded by `lastScreenRef`.
+- HUD `consoleProgress` text is built by string-concat every tick — re-create strings only when count changes.
+- `getRockets()` re-parses localStorage on every call (`src/save.js:52-57`, called from `src/game.js:104, 130` and `src/ui/HangarScreen.jsx`). Cache it.
 - Hover SFX on every mouseover (`src/ui/MainMenu.jsx:45`, `src/ui/ProfileScreen.jsx:21`) thrashes Web Audio.
-- 4–6 dynamic lights in the facility scene; only one is needed.
+- `renderer.setPixelRatio` is capped at 1.5 (`src/renderer.js:67`) — verify on hi-DPI displays if sharpness matters.
+- Per-frame `Object3D.traverse` in `clearScene` / `disposeObject` walks the entire scene tree on every state transition.

@@ -2,10 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#020c1b" />
     <title>Space Rocket Builder Simulator</title>
     <meta name="description" content="Design, build, and launch your own rockets in this immersive 3D browser-based space simulator. Inspired by NASA, SpaceX, and the spirit of exploration." />
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Space Rocket Builder — Build &amp; Launch" />
+    <meta property="og:description" content="A free, browser-based 3D rocket builder &amp; launch simulator. Pilot your own missions." />
+    <meta property="og:image" content="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23020c1b'/%3E%3Cpath d='M32 6c8 9 12 18 12 30l8 8-7 3-5-6H24l-5 6-7-3 8-8C20 24 24 15 32 6z' fill='%23e8f4ff'/%3E%3C/svg%3E" />
+    <meta property="og:image:width" content="64" />
+    <meta property="og:image:height" content="64" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Space Rocket Builder" />
+    <meta name="twitter:description" content="Design, build, and launch rockets in 3D — directly in your browser." />
+
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23020c1b'/%3E%3Cpath d='M32 6c8 9 12 18 12 30l8 8-7 3-5-6H24l-5 6-7-3 8-8C20 24 24 15 32 6z' fill='%23e8f4ff'/%3E%3Cpath d='M32 6c4 8 6 18 6 35H26c0-17 2-27 6-35z' fill='%2300e5ff'/%3E%3Ccircle cx='32' cy='24' r='5' fill='%23020c1b'/%3E%3Cpath d='M27 45h10l-5 13z' fill='%23ffab00'/%3E%3C/svg%3E" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23020c1b'/%3E%3Cpath d='M32 6c8 9 12 18 12 30l8 8-7 3-5-6H24l-5 6-7-3 8-8C20 24 24 15 32 6z' fill='%23e8f4ff'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -18,8 +32,8 @@
         <div class="loading-ring"></div>
         <div class="loading-ring loading-ring--2"></div>
         <div class="loading-ring loading-ring--3"></div>
-        <span class="loading-text">INITIALIZING SYSTEMS</span>
-        <div class="loading-bar-wrap"><div class="loading-bar-fill"></div></div>
+        <span class="loading-text" id="loading-text">INITIALIZING SYSTEMS</span>
+        <div class="loading-bar-wrap"><div class="loading-bar-fill" id="loading-bar-fill"></div></div>
       </div>
     </div>
 
@@ -28,6 +42,15 @@
 
     <!-- React UI root — layered on top -->
     <div id="root"></div>
+
+    <!-- Service worker registration (production only). -->
+    <script>
+      if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
 
     <script type="module" src="/src/main.jsx"></script>
   </body>

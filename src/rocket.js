@@ -91,6 +91,7 @@ function M() {
 function markShell(mesh) {
   mesh.userData.isRocketShell = true
   mesh.userData.ignoreWhenInside = true
+  mesh.userData.sharedGeometry = true
   return mesh
 }
 
@@ -373,9 +374,20 @@ export function buildRocket(config = {}) {
   const group = new Group()
   group.name = config.name || 'Rocket'
   group.userData.config = config
+  group.userData.sharedGeometry = true
 
   buildExterior(config, group)
   buildInterior(group)
+
+  // Mark every descendant whose geometry/material is shared so that
+  // renderer.disposeObject can skip them — otherwise the module-level
+  // G() / M() singletons would be freed after the first rocket disposal
+  // and every subsequent build would render as invisible.
+  group.traverse(obj => {
+    if (obj !== group && obj.userData && !obj.userData.sharedGeometry) {
+      obj.userData.sharedGeometry = true
+    }
+  })
 
   return group
 }

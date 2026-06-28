@@ -413,6 +413,15 @@ export function buildFacilityScene(scene) {
   sun.userData.persistent = true
   scene.add(sun)
 
+  // ── Fill lighting (so undersides aren't pitch black) ──
+  const facilityAmbient = new AmbientLight(0xffffff, 1.5)
+  facilityAmbient.userData.persistent = true
+  scene.add(facilityAmbient)
+
+  const facilityHemi = new HemisphereLight(0xa0c0ff, 0x203040, 1.2)
+  facilityHemi.userData.persistent = true
+  scene.add(facilityHemi)
+
   addStars(scene)
 
   return objs

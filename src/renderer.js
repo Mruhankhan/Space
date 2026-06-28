@@ -63,6 +63,8 @@ export const renderer = {
       alpha: false,
       powerPreference: 'high-performance',
       stencil: false,
+      // Required for renderer.getCanvasDataURL() to read pixels after render.
+      preserveDrawingBuffer: true,
     })
     _renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     _renderer.setSize(window.innerWidth, window.innerHeight)
@@ -161,6 +163,10 @@ export const renderer = {
   disposeObject(obj) {
     if (!obj) return
     obj.traverse(child => {
+      // Skip meshes whose geometry/material is owned by a module-level
+      // singleton cache (e.g. rocket.js G()/M()) — disposing them would
+      // break every subsequent build of the same kind.
+      if (child.userData && child.userData.sharedGeometry) return
       if (child.geometry) child.geometry.dispose?.()
       if (child.material) {
         if (Array.isArray(child.material)) {
@@ -174,4 +180,17 @@ export const renderer = {
 
   addListener(fn) { LISTENERS.add(fn) },
   removeListener(fn) { LISTENERS.delete(fn) },
+
+  /**
+   * Snapshot the current rendered frame as a PNG data URL.
+   * Used by the result-share flow.
+   * `preserveDrawingBuffer` would let us read at any time; without it,
+   * the caller should request immediately after a render call.
+   */
+  getCanvasDataURL(type = 'image/png', quality = 0.92) {
+    if (!_renderer) return null
+    const c = _renderer.domElement
+    try { return c.toDataURL(type, quality) }
+    catch (e) { console.error('[renderer] getCanvasDataURL failed', e); return null }
+  },
 }

@@ -1,9 +1,10 @@
 // save.js — localStorage persistence for profile, rockets, and pilot log
 
 const KEYS = {
-  PROFILE: 'srbs_profile',
-  ROCKETS: 'srbs_rockets',
-  LOG:     'srbs_log',
+  PROFILE:  'srbs_profile',
+  ROCKETS:  'srbs_rockets',
+  LOG:      'srbs_log',
+  MISSIONS: 'srbs_missions',
 }
 
 const DEFAULT_ROCKETS = [
@@ -48,6 +49,27 @@ export function setProfile(profile) {
   localStorage.setItem(KEYS.PROFILE, JSON.stringify(profile))
 }
 
+// ── Missions ─────────────────────────────────────────────
+export function getMissions() {
+  try {
+    const raw = localStorage.getItem(KEYS.MISSIONS)
+    return raw ? JSON.parse(raw) : { history: [], bestScore: 0 }
+  } catch { return { history: [], bestScore: 0 } }
+}
+
+export function setMissions(state) {
+  localStorage.setItem(KEYS.MISSIONS, JSON.stringify(state))
+}
+
+export function addMissionResult(entry) {
+  const state = getMissions()
+  state.history.unshift({ ...entry, timestamp: new Date().toISOString() })
+  state.history = state.history.slice(0, 50)
+  state.bestScore = Math.max(state.bestScore || 0, entry.score || 0)
+  setMissions(state)
+  return state
+}
+
 // ── Rockets ──────────────────────────────────────────────
 export function getRockets() {
   try {
@@ -87,4 +109,6 @@ export function clearProgress() {
   localStorage.removeItem(KEYS.PROFILE)
   localStorage.removeItem(KEYS.ROCKETS)
   localStorage.removeItem(KEYS.LOG)
+  localStorage.removeItem(KEYS.MISSIONS)
+  localStorage.removeItem('srbs_unlocks')
 }

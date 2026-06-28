@@ -741,3 +741,144 @@ body { font-family: var(--font-body); color: var(--c-white); }
   .key { min-width: 34px; padding: 3px 6px; }
   .hud-actions .btn { font-size: 11px; letter-spacing: 1px; }
 }
+
+/* ─────────────────────────────────────────────────────────
+   v0.2 — crosshair, compass, touch joysticks, console flash,
+   error overlay, result-share row.
+   ───────────────────────────────────────────────────────── */
+
+.crosshair {
+  position: fixed;
+  top: 50%; left: 50%;
+  width: 22px; height: 22px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.crosshair-ring {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid rgba(0, 229, 255, 0.75);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.3);
+}
+.crosshair-dot {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 3px; height: 3px;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 229, 255, 0.9);
+  border-radius: 50%;
+}
+
+.console-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  background: radial-gradient(ellipse at center,
+    rgba(0, 229, 255, 0.18) 0%,
+    rgba(0, 229, 255, 0) 60%);
+  animation: console-flash-anim 700ms ease-out forwards;
+}
+@keyframes console-flash-anim {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.rocket-compass {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 96px;
+}
+
+.touch-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 24px;
+}
+.touch-joystick {
+  position: relative;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+.touch-joystick--left  { align-self: flex-end; margin-bottom: 32px; margin-left: 24px; }
+.touch-joystick--right { align-self: flex-end; margin-bottom: 32px; margin-right: 24px; }
+.touch-joystick-base {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.18), rgba(0, 229, 255, 0.04) 70%);
+  border: 2px solid rgba(0, 229, 255, 0.4);
+  backdrop-filter: blur(4px);
+}
+.touch-joystick-knob {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 40px; height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+  transition: transform 0.05s linear;
+}
+
+.error-overlay { background: rgba(2, 12, 27, 0.92); }
+.error-card {
+  max-width: 460px;
+  margin: 24px;
+  padding: 28px;
+  text-align: center;
+  border: 1px solid rgba(255, 88, 88, 0.4);
+}
+.error-icon { font-size: 48px; margin-bottom: 8px; }
+.error-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--c-danger);
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+.error-message {
+  font-size: 13px;
+  color: var(--c-muted);
+  margin: 0 0 16px 0;
+}
+.error-detail {
+  font-family: 'Inter', monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 8px;
+  border-radius: 4px;
+  text-align: left;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.result-share {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  width: 100%;
+}
+.result-share .btn {
+  flex: 1;
+  font-size: 12px;
+  padding: 10px;
+}
+.result-share .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

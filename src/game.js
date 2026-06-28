@@ -13,6 +13,9 @@ import { buildRocket }  from './rocket.js'
 import { Character }    from './character.js'
 import { Launch }       from './launch.js'
 import { getRockets }   from './save.js'
+import { loadRocket, loadSceneAssets, preloadAll as preloadAssets } from './loaders.js'
+import { generateMission } from './missions.js'
+import { applyUnlock, loadUnlocks, recordMission } from './unlocks.js'
 
 export const STATES = {
   LOADING:   'LOADING',
@@ -47,6 +50,11 @@ class Game {
 
     // Cinematic state for menu/hangar.
     this._menuRot = { earth: 0, orbit: 0, sat: 0 }
+
+    // Newly-added state.
+    this.activeRocket  = null   // last rocket picked in Hangar — carried into FACILITY.
+    this.currentMission = null  // generated per launch.
+    this._consoleFlashes = new Map()  // consoleId → seconds remaining
   }
 
   // ── Init ─────────────────────────────────────────────────
@@ -55,7 +63,17 @@ class Game {
     physics.init()
     particles.init(renderer.scene)
     renderer.startLoop(this._frame.bind(this))
+    // Best-effort preload. Resolves even if all assets fail — falls back
+    // to procedural primitives (rocket.js / world.js).
+    try { await preloadAssets() }
+    catch (e) { console.warn('[game] preload failed', e) }
     console.log('[game] ready')
+  }
+
+  /** Public hook for App.jsx to set the active rocket from Hangar selection. */
+  setActiveRocket(config) {
+    if (!config) return
+    this.activeRocket = config
   }
 
   // ── UI callback registration ─────────────────────────────
@@ -101,7 +119,22 @@ class Game {
         renderer.clearScene()
         renderer.setFog(0x06111d, 0.012)
         buildHangarScene(renderer.scene)
-        const rocketConfig = payload.rocket || getRockets()[0]
+        const rocketConfig = payload.rocket || this.activeRocket || getRockets()[0]
+        this.activeRocket = rocketConfig
+        // loadRocket falls back to buildRocket if any .glb is missing.
+        loadRocket(rocketConfig).then(rocket => {
+          if (this.state !== STATES.HANGAR) return
+          if (this._rocket) {
+            renderer.disposeObject(this._rocket)
+            renderer.scene.remove(this._rocket)
+          }
+          this._rocket = rocket
+          this._rocket.position.set(0, 0.2, 0)
+          renderer.scene.add(this._rocket)
+          this._cacheRocketAnimations()
+        })
+        // Also build the procedural rocket synchronously so the hangar has
+        // *something* visible during the load.
         this._rocket = buildRocket(rocketConfig)
         this._rocket.position.set(0, 0.2, 0)
         renderer.scene.add(this._rocket)
@@ -126,8 +159,35 @@ class Game {
         if (this._sceneData.boxes) {
           for (const b of this._sceneData.boxes) physics.addStatic(b, { tag: 'box' })
         }
+        // Catch-all ground floor at y≈0 — guarantees the player never
+        // falls through the map on spawn or when wandering off the pad.
+        physics.addFloorBox(-200, -0.1, -200, 200, 0.05, 200)
 
-        const rocketConfig = payload.rocket || getRockets()[0]
+        const rocketConfig = payload.rocket || this.activeRocket || getRockets()[0]
+        this.activeRocket = rocketConfig
+        this.currentMission = generateMission({ rocketId: rocketConfig.id })
+
+        // loadRocket falls back to buildRocket if any .glb is missing.
+        loadRocket(rocketConfig).then(rocket => {
+          if (this.state !== STATES.FACILITY) return
+          if (this._rocket) {
+            renderer.disposeObject(this._rocket)
+            renderer.scene.remove(this._rocket)
+          }
+          this._rocket = rocket
+          this._rocket.position.set(0, 0.3, 0)
+          renderer.scene.add(this._rocket)
+          this._cacheRocketAnimations()
+          this._registerRocketColliders()
+          this._prepareRocketConsoleState()
+          this._broadcast(STATES.FACILITY, {
+            launchReady: this._canLaunch(),
+            consoleProgress: this._rocketConsoleCount > 0
+              ? `0/${this._rocketConsoleCount} systems online`
+              : 'No system checks required',
+          })
+        })
+        // Procedural rocket visible immediately.
         this._rocket = buildRocket(rocketConfig)
         this._rocket.position.set(0, 0.3, 0)
         renderer.scene.add(this._rocket)
@@ -153,6 +213,7 @@ class Game {
           consoleProgress: this._rocketConsoleCount > 0
             ? `0/${this._rocketConsoleCount} systems online`
             : 'No system checks required',
+          mission: this.currentMission,
         })
         break
       }
@@ -163,7 +224,16 @@ class Game {
           renderer.scene,
           renderer.camera,
           this._rocket,
-          (result) => this._broadcast(STATES.LAUNCH, { result }),
+          (result) => {
+            // Apply unlocks based on the score returned by Launch.
+            try {
+              let unlocks = loadUnlocks()
+              unlocks = applyUnlock(unlocks, result.score || 0)
+              recordMission(unlocks, result)
+            } catch (e) { console.warn('[game] unlock apply failed', e) }
+            this._broadcast(STATES.LAUNCH, { result })
+          },
+          this.currentMission,
         )
         this._launch.start()
         break
@@ -254,11 +324,21 @@ class Game {
   _tickFacility(delta) {
     if (!this._character) return
 
-    // Camera first (instant, frame-aligned with mouse delta).
+    // Movement + physics first, so the camera sees the up-to-date position.
+    this._character.update(delta, this._rocket)
+
+    // Then apply the camera (instant, frame-aligned with mouse delta).
     this._character.applyCamera(renderer.camera)
 
-    // Then movement + physics.
-    this._character.update(delta, this._rocket)
+    // Console flash decay.
+    this._updateConsoleFlashes(delta)
+
+    // Re-acquire pointer lock if the user clicked the canvas while unlocked
+    // and we're on a fine-pointer device. input.requestPointerLock()
+    // is a no-op when pointer is already locked or device is coarse.
+    if (!input.isPointerLocked() && this._character.grounded) {
+      input.requestPointerLock()
+    }
 
     // Cosmetic animations.
     this._animateRocketLights(delta, true)
@@ -333,10 +413,69 @@ class Game {
     this._rocketConsoleState[consoleId] = true
     let active = 0
     for (const k in this._rocketConsoleState) if (this._rocketConsoleState[k]) active++
+
+    // Visual + audio feedback.
+    sound.play('console')
+    this._flashConsole(consoleId, 0.6)
+
     this._broadcast(STATES.FACILITY, {
       consoleProgress: `${active}/${this._rocketConsoleCount} systems online`,
       launchReady: this._canLaunch(),
+      consoleActivated: consoleId,
     })
+  }
+
+  _flashConsole(consoleId, duration) {
+    if (!this._rocket) return
+    this._rocket.traverse(obj => {
+      if (obj.userData && obj.userData.consoleId === consoleId) {
+        // Save original emissive once.
+        if (obj.material && obj.userData._origEmissive === undefined) {
+          obj.userData._origEmissive = obj.material.emissive
+            ? obj.material.emissive.clone()
+            : null
+        }
+        if (obj.material) {
+          if (!obj.material.emissive) obj.material.emissive = new (this._rocket.children[0]?.material?.constructor || obj.material.constructor)(0xffffff)
+          obj.material.emissive.setHex(0x00ffff)
+          obj.material.emissiveIntensity = 2.5
+        }
+        this._consoleFlashes.set(consoleId, duration)
+      }
+    })
+  }
+
+  _updateConsoleFlashes(delta) {
+    if (!this._consoleFlashes.size) return
+    const toRemove = []
+    for (const [id, remaining] of this._consoleFlashes) {
+      const next = remaining - delta
+      if (next <= 0) {
+        // Restore.
+        if (this._rocket) {
+          this._rocket.traverse(obj => {
+            if (obj.userData && obj.userData.consoleId === id && obj.material) {
+              if (obj.userData._origEmissive) {
+                obj.material.emissive.copy(obj.userData._origEmissive)
+                obj.material.emissiveIntensity = 1
+              }
+            }
+          })
+        }
+        toRemove.push(id)
+      } else {
+        // Pulse intensity as it decays.
+        if (this._rocket) {
+          this._rocket.traverse(obj => {
+            if (obj.userData && obj.userData.consoleId === id && obj.material) {
+              obj.material.emissiveIntensity = 1 + 1.5 * (next / 0.6)
+            }
+          })
+        }
+        this._consoleFlashes.set(id, next)
+      }
+    }
+    for (const id of toRemove) this._consoleFlashes.delete(id)
   }
 
   _cacheRocketAnimations() {

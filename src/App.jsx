@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState, useCallback, memo } from 'react'
 import { game, STATES } from './game.js'
 import { getProfile, clearProgress } from './save.js'
-import ProfileScreen          from './ui/ProfileScreen.jsx'
-import MainMenu               from './ui/MainMenu.jsx'
-import HangarScreen           from './ui/HangarScreen.jsx'
-import HUD                    from './ui/HUD.jsx'
+import { onProgress } from './loaders.js'
+import { loadUnlocks } from './unlocks.js'
+import ErrorBoundary              from './ui/ErrorBoundary.jsx'
+import ProfileScreen              from './ui/ProfileScreen.jsx'
+import MainMenu                   from './ui/MainMenu.jsx'
+import HangarScreen               from './ui/HangarScreen.jsx'
+import HUD                        from './ui/HUD.jsx'
 import { LaunchOverlay, ResultOverlay } from './ui/LaunchOverlay.jsx'
 
 // Default values kept outside component so they are not re-allocated.
@@ -28,9 +31,13 @@ export default function App() {
   const [facilityData, setFacility] = useState(DEFAULT_FACILITY)
   const [launchData, setLaunch]     = useState(DEFAULT_LAUNCH)
   const [selectedRocket, setRocket] = useState(null)
+  const [forceTouch, setForceTouch] = useState(false)
+  const [consoleFlashId, setConsoleFlashId] = useState(null)
+  const [loadProgress, setLoadProgress] = useState(0)
 
   // Track screen via ref so we can guard against redundant setState.
   const lastScreenRef = useRef(STATES.LOADING)
+  const consoleFlashTimer = useRef(null)
 
   // Register UI callback. We DO NOT setScreen on every facility tick —
   // simulation state is kept in the facilityData object so React only
@@ -63,6 +70,11 @@ export default function App() {
         }
         return next === f ? f : next
       })
+      if (payload.consoleActivated) {
+        setConsoleFlashId(payload.consoleActivated)
+        if (consoleFlashTimer.current) clearTimeout(consoleFlashTimer.current)
+        consoleFlashTimer.current = setTimeout(() => setConsoleFlashId(null), 700)
+      }
     }
     if (state === STATES.LAUNCH) {
       setLaunch(l => {
@@ -83,18 +95,52 @@ export default function App() {
 
   useEffect(() => {
     game.onUIUpdate(handleGameUpdate)
-    game.init().then(() => {
-      document.getElementById('loading-screen')?.classList.add('hidden')
-      const existing = getProfile()
-      if (existing) {
-        setProfile(existing)
-        game.transition(STATES.MAIN_MENU)
-      } else {
-        game.transition(STATES.PROFILE)
-      }
+    // Subscribe to LoadingManager progress for the loading bar.
+    const offProgress = onProgress(({ ratio }) => {
+      const pct = Math.max(0, Math.min(1, ratio))
+      setLoadProgress(pct)
     })
-    return () => game.onUIUpdate(null)
+    game.init().then(() => {
+      const ls = document.getElementById('loading-screen')
+      const bar = document.getElementById('loading-bar-fill')
+      const txt = document.getElementById('loading-text')
+      if (bar) bar.style.width = '100%'
+      if (txt) txt.textContent = 'SYSTEMS READY'
+      setTimeout(() => {
+        ls?.classList.add('hidden')
+        const existing = getProfile()
+        if (existing) {
+          setProfile(existing)
+          game.transition(STATES.MAIN_MENU)
+        } else {
+          game.transition(STATES.PROFILE)
+        }
+      }, 250)
+    })
+    return () => {
+      game.onUIUpdate(null)
+      if (typeof offProgress === 'function') offProgress()
+    }
   }, [handleGameUpdate])
+
+  // Detect coarse-pointer / small-viewport devices for touch controls.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(pointer: coarse)')
+    const apply = () => setForceTouch(mq.matches || window.innerWidth < 720)
+    apply()
+    mq.addEventListener?.('change', apply)
+    window.addEventListener('resize', apply)
+    return () => {
+      mq.removeEventListener?.('change', apply)
+      window.removeEventListener('resize', apply)
+    }
+  }, [])
+
+  // Pre-load unlocks so a remount doesn't lose state.
+  useEffect(() => {
+    try { loadUnlocks() } catch {}
+  }, [])
 
   const handleProfileComplete = useCallback((p) => {
     setProfile(p)
@@ -103,13 +149,14 @@ export default function App() {
 
   const handleMenuNav = useCallback((id) => {
     setActiveMenu(id)
-    if (id === 'hangar')   game.transition(STATES.HANGAR)
-    if (id === 'facility') game.transition(STATES.FACILITY, { rocket: selectedRocket })
-    if (id === 'start')    game.transition(STATES.FACILITY, { rocket: selectedRocket })
+    if (id === 'hangar')   game.transition(STATES.HANGAR, { rocket: selectedRocket })
+    if (id === 'facility') game.transition(STATES.FACILITY, { rocket: selectedRocket || game.activeRocket })
+    if (id === 'start')    game.transition(STATES.FACILITY, { rocket: selectedRocket || game.activeRocket })
   }, [selectedRocket])
 
   const handleEnterFacility = useCallback((rocket) => {
     setRocket(rocket)
+    game.setActiveRocket(rocket)
     game.transition(STATES.FACILITY, { rocket })
   }, [])
 
@@ -140,7 +187,7 @@ export default function App() {
   }, [])
 
   return (
-    <>
+    <ErrorBoundary>
       {screen === STATES.PROFILE && (
         <ProfileScreen onComplete={handleProfileComplete} />
       )}
@@ -157,7 +204,11 @@ export default function App() {
       {screen === STATES.HANGAR && (
         <HangarScreen
           onBack={() => game.transition(STATES.MAIN_MENU)}
-          onRocketChange={(rocket) => game.previewRocket(rocket)}
+          onRocketChange={(rocket) => {
+            setRocket(rocket)
+            game.setActiveRocket(rocket)
+            game.previewRocket(rocket)
+          }}
           onTestFacility={handleEnterFacility}
         />
       )}
@@ -169,6 +220,8 @@ export default function App() {
           insideRocket={facilityData.insideRocket}
           launchReady={facilityData.launchReady}
           consoleProgress={facilityData.consoleProgress}
+          forceTouch={forceTouch}
+          consoleActivated={consoleFlashId}
           onExitToMenu={handleReturnToMenu}
           onLaunch={handleLaunch}
         />
@@ -188,6 +241,6 @@ export default function App() {
           onReturnToMenu={handleReturnToMenu}
         />
       )}
-    </>
+    </ErrorBoundary>
   )
 }
