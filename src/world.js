@@ -1,38 +1,66 @@
-// world.js — Scene geometry for each game state
+// world.js — Procedural scene geometry + collision data.
+// Returns:
+//   { floors: Mesh[], boxes: Mesh[], earthSphere, earthWire, orbitRing, sat }
+// Floors are walkable top surfaces; boxes are solid obstacles.
 
-import { AmbientLight, BoxGeometry, BufferAttribute, BufferGeometry, CircleGeometry, Color, CylinderGeometry, DirectionalLight, FogExp2, GridHelper, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, PointLight, Points, PointsMaterial, SphereGeometry, SpotLight, TorusGeometry } from 'three'
+import {
+  AmbientLight,
+  BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
+  CircleGeometry,
+  Color,
+  CylinderGeometry,
+  DirectionalLight,
+  FogExp2,
+  GridHelper,
+  HemisphereLight,
+  InstancedMesh,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  Object3D,
+  PlaneGeometry,
+  PointLight,
+  Points,
+  PointsMaterial,
+  SphereGeometry,
+  SpotLight,
+  TorusGeometry,
+} from 'three'
 import { physics } from './physics.js'
 
-// ── Shared Materials ───────────────────────────────────────
-const concreteMat = () => new MeshStandardMaterial({ color: 0x87919a, roughness: 0.9, metalness: 0.04 })
-const metalMat    = (c = 0x445566) => new MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.8 })
-const glowMat     = (c, e) => new MeshStandardMaterial({ color: c, emissive: e, emissiveIntensity: 1.2, roughness: 0.5 })
-const glassMat    = () => new MeshStandardMaterial({ color: 0x88aacc, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.3 })
-
-// ── Lighting helpers ───────────────────────────────────────
-function makeSun(scene, y = 60, color = 0xfff0d0, intensity = 1.6) {
-  const sun = new DirectionalLight(color, intensity)
-  sun.position.set(40, y, 30)
-  sun.castShadow = true
-  sun.shadow.mapSize.set(1024, 1024)
-  sun.shadow.camera.near = 0.5
-  sun.shadow.camera.far = 400
-  sun.shadow.camera.left = sun.shadow.camera.bottom = -80
-  sun.shadow.camera.right = sun.shadow.camera.top = 80
-  sun.shadow.bias = -0.001
-  scene.add(sun)
-  return sun
+// ── Shared materials (single instance reused across the scene) ──
+const MAT = {
+  concrete: new MeshStandardMaterial({ color: 0x87919a, roughness: 0.9, metalness: 0.04 }),
+  metalDark: new MeshStandardMaterial({ color: 0x445566, roughness: 0.4, metalness: 0.8 }),
+  metalMid:  new MeshStandardMaterial({ color: 0x586b78, roughness: 0.5, metalness: 0.7 }),
+  metalLight: new MeshStandardMaterial({ color: 0x7890a0, roughness: 0.4, metalness: 0.85 }),
+  metalRung:  new MeshStandardMaterial({ color: 0x556677, roughness: 0.6, metalness: 0.6 }),
+  glass:     new MeshStandardMaterial({ color: 0x88aacc, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.3 }),
+  ground:    new MeshStandardMaterial({ color: 0x2a3a26, roughness: 1.0, metalness: 0.0 }),
+  stripGlow: new MeshStandardMaterial({ color: 0x002244, emissive: 0x0055aa, emissiveIntensity: 1.2, roughness: 0.5 }),
+  panel:     new MeshStandardMaterial({ color: 0x040c18, roughness: 0.85 }),
+  wall:      new MeshStandardMaterial({ color: 0x030d20, roughness: 0.9, metalness: 0.5 }),
+  floorMenu: new MeshStandardMaterial({ color: 0x040e1e, roughness: 0.7, metalness: 0.6 }),
+  floorHangar: new MeshStandardMaterial({ color: 0x101a24, roughness: 0.72, metalness: 0.42 }),
+  pedestal:  new MeshStandardMaterial({ color: 0x0a1828, roughness: 0.3, metalness: 0.9 }),
+  road:      new MeshStandardMaterial({ color: 0x20242a, roughness: 0.95 }),
+  tankBody:  new MeshStandardMaterial({ color: 0xd6e1e8, roughness: 0.35, metalness: 0.72 }),
+  antenna:   new MeshStandardMaterial({ color: 0x889aaa, roughness: 0.4, metalness: 0.7 }),
+  earthBody: new MeshStandardMaterial({ color: 0x001133, emissive: 0x002266, emissiveIntensity: 0.4, roughness: 0.8 }),
+  earthWire: new MeshBasicMaterial({ color: 0x0088ff, wireframe: true, transparent: true, opacity: 0.15 }),
+  ring:      new MeshStandardMaterial({ color: 0x00aaff, emissive: 0x0088ff, emissiveIntensity: 1.2, roughness: 0.5 }),
+  ringAmber: new MeshStandardMaterial({ color: 0x00aaff, emissive: 0x00aaff, emissiveIntensity: 1.2, roughness: 0.5 }),
+  starPoint: new PointsMaterial({ color: 0xffffff, size: 0.75, sizeAttenuation: true }),
+  postFence: new MeshStandardMaterial({ color: 0x556677, roughness: 0.6, metalness: 0.5 }),
+  strobe:    new MeshStandardMaterial({ emissive: 0xff2200, emissiveIntensity: 1 }),
 }
 
-function makePoint(scene, color, intensity, pos, dist) {
-  const l = new PointLight(color, intensity, dist)
-  l.position.set(...pos)
-  scene.add(l)
-  return l
-}
-
-// ── Starfield ──────────────────────────────────────────────
-function makeStars(scene) {
+// Cached starfield geometry (regenerated only if missing).
+let _starGeo = null
+function getStars() {
+  if (_starGeo) return _starGeo
   const count = 1400
   const pos = new Float32Array(count * 3)
   for (let i = 0; i < count; i++) {
@@ -45,124 +73,110 @@ function makeStars(scene) {
   }
   const geo = new BufferGeometry()
   geo.setAttribute('position', new BufferAttribute(pos, 3))
-  const mat = new PointsMaterial({ color: 0xffffff, size: 0.75, sizeAttenuation: true })
-  scene.add(new Points(geo, mat))
+  _starGeo = geo
+  return geo
+}
+
+function addStars(scene) {
+  const stars = new Points(getStars(), MAT.starPoint)
+  stars.userData.persistent = true
+  scene.add(stars)
+  return stars
 }
 
 // ─────────────────────────────────────────────────────────────
-//  MAIN MENU SCENE — Futuristic command center
+//  MAIN MENU SCENE
 // ─────────────────────────────────────────────────────────────
 export function buildMenuScene(scene) {
   scene.background = new Color(0x020c1b)
   scene.fog = new FogExp2(0x020c1b, 0.04)
 
-  // Floor — polished dark metal with grid lines
-  const floor = new Mesh(
-    new PlaneGeometry(60, 60, 30, 30),
-    new MeshStandardMaterial({ color: 0x040e1e, roughness: 0.7, metalness: 0.6, wireframe: false })
-  )
+  const floor = new Mesh(new PlaneGeometry(60, 60), MAT.floorMenu)
   floor.rotation.x = -Math.PI / 2
   floor.receiveShadow = true
+  floor.userData.persistent = true
   scene.add(floor)
 
-  // Grid overlay
   const grid = new GridHelper(60, 40, 0x003355, 0x001833)
   grid.position.y = 0.01
+  grid.userData.persistent = true
   scene.add(grid)
 
-  // Back wall
-  const wall = new Mesh(
-    new PlaneGeometry(60, 20),
-    new MeshStandardMaterial({ color: 0x030d20, roughness: 0.9, metalness: 0.5 })
-  )
+  const wall = new Mesh(new PlaneGeometry(60, 20), MAT.wall)
   wall.position.set(0, 10, -25)
   wall.receiveShadow = true
+  wall.userData.persistent = true
   scene.add(wall)
 
-  // Large holographic Earth globe (sphere + wireframe)
-  const earthSphere = new Mesh(
-    new SphereGeometry(4, 32, 32),
-    new MeshStandardMaterial({ color: 0x001133, emissive: 0x002266, emissiveIntensity: 0.4, roughness: 0.8 })
-  )
+  const earthSphere = new Mesh(new SphereGeometry(4, 32, 32), MAT.earthBody)
   earthSphere.position.set(8, 4, -12)
+  earthSphere.userData.persistent = true
   scene.add(earthSphere)
 
-  const earthWire = new Mesh(
-    new SphereGeometry(4.05, 24, 24),
-    new MeshBasicMaterial({ color: 0x0088ff, wireframe: true, transparent: true, opacity: 0.15 })
-  )
+  const earthWire = new Mesh(new SphereGeometry(4.05, 16, 16), MAT.earthWire)
   earthWire.position.copy(earthSphere.position)
+  earthWire.userData.persistent = true
   scene.add(earthWire)
-  earthSphere.userData.rotateY = 0.1
-  earthWire.userData.rotateY = 0.1
 
-  // Orbiting ring around earth
-  const orbitRing = new Mesh(
-    new TorusGeometry(5.5, 0.03, 6, 64),
-    glowMat(0x0044aa, 0x0088ff)
-  )
+  const orbitRing = new Mesh(new TorusGeometry(5.5, 0.03, 6, 64), MAT.ring)
   orbitRing.position.copy(earthSphere.position)
   orbitRing.rotation.x = 0.5
+  orbitRing.userData.persistent = true
   scene.add(orbitRing)
-  orbitRing.userData.rotateZ = 0.3
 
-  // Small orbit satellite
-  const sat = new Mesh(new BoxGeometry(0.3, 0.1, 0.5), metalMat(0x889aaa))
+  const sat = new Mesh(new BoxGeometry(0.3, 0.1, 0.5), MAT.antenna)
   sat.position.copy(earthSphere.position)
-  sat.userData.orbitEarth = { radius: 5.5, speed: 0.8, angle: 0 }
+  sat.userData.persistent = true
   scene.add(sat)
 
-  // Monitor screens on wall
+  // Monitor screens on wall (instanced).
   const screenPositions = [-12, -6, 0, 6, 12]
-  screenPositions.forEach((x, i) => {
-    const frame = new Mesh(new BoxGeometry(4.5, 3, 0.15), metalMat(0x111a28))
-    frame.position.set(x, 9, -24.9)
+  const screenColors = [0x003388, 0x004400, 0x330033, 0x003333, 0x220044]
+  for (let i = 0; i < screenPositions.length; i++) {
+    const frame = new Mesh(new BoxGeometry(4.5, 3, 0.15), MAT.metalDark)
+    frame.position.set(screenPositions[i], 9, -24.9)
+    frame.userData.persistent = true
     scene.add(frame)
-    const scrContent = new Mesh(
+    const scr = new Mesh(
       new PlaneGeometry(4.2, 2.7),
       new MeshStandardMaterial({
         color: 0x001122,
-        emissive: [0x003388, 0x004400, 0x330033, 0x003333, 0x220044][i],
+        emissive: screenColors[i],
         emissiveIntensity: 0.7,
       })
     )
-    scrContent.position.set(x, 9, -24.78)
-    scene.add(scrContent)
-  })
-
-  // Neon light strips along ceiling
-  for (let x = -20; x <= 20; x += 8) {
-    const strip = new Mesh(new BoxGeometry(0.1, 0.1, 50), glowMat(0x002244, 0x0055aa))
-    strip.position.set(x, 8, 0)
-    scene.add(strip)
-    const l = new PointLight(0x0077cc, 0.5, 20)
-    l.position.set(x, 7.5, 0)
-    scene.add(l)
+    scr.position.set(screenPositions[i], 9, -24.78)
+    scr.userData.persistent = true
+    scene.add(scr)
   }
 
-  // Control desk pillars
-  for (let x of [-10, 0, 10]) {
-    const desk = new Mesh(new BoxGeometry(4, 1, 1.5), metalMat(0x0a1828))
+  // Neon light strips.
+  for (let x = -20; x <= 20; x += 8) {
+    const strip = new Mesh(new BoxGeometry(0.1, 0.1, 50), MAT.stripGlow)
+    strip.position.set(x, 8, 0)
+    strip.userData.persistent = true
+    scene.add(strip)
+  }
+
+  // Control desks.
+  for (const x of [-10, 0, 10]) {
+    const desk = new Mesh(new BoxGeometry(4, 1, 1.5), MAT.metalDark)
     desk.position.set(x, 0.5, 3)
     desk.castShadow = true
     desk.receiveShadow = true
+    desk.userData.persistent = true
     scene.add(desk)
-    const deskScreen = new Mesh(
+    const scr = new Mesh(
       new BoxGeometry(3.5, 0.8, 0.05),
       new MeshStandardMaterial({ color: 0x001122, emissive: 0x0066bb, emissiveIntensity: 0.8 })
     )
-    deskScreen.position.set(x, 1.2, 2.4)
-    deskScreen.rotation.x = -0.4
-    scene.add(deskScreen)
+    scr.position.set(x, 1.2, 2.4)
+    scr.rotation.x = -0.4
+    scr.userData.persistent = true
+    scene.add(scr)
   }
 
-  // Ambient + key light
-  const ambient = new AmbientLight(0x0a1628, 1.0)
-  scene.add(ambient)
-  makePoint(scene, 0x0066ff, 0.8, [8, 8, -10], 30)
-  makePoint(scene, 0xffaa00, 0.4, [-8, 5, 0], 20)
-
-  makeStars(scene)
+  addStars(scene)
 
   return { earthSphere, earthWire, orbitRing, sat }
 }
@@ -174,253 +188,232 @@ export function buildHangarScene(scene) {
   scene.background = new Color(0x06111d)
   scene.fog = new FogExp2(0x06111d, 0.012)
 
-  // Floor
-  const floor = new Mesh(
-    new PlaneGeometry(50, 50),
-      new MeshStandardMaterial({ color: 0x101a24, roughness: 0.72, metalness: 0.42 })
-  )
+  const floor = new Mesh(new PlaneGeometry(50, 50), MAT.floorHangar)
   floor.rotation.x = -Math.PI / 2
   floor.receiveShadow = true
+  floor.userData.persistent = true
   scene.add(floor)
 
-  // Pedestal
   const pedestal = new Mesh(
     new CylinderGeometry(2.5, 2.8, 0.4, 32),
-    new MeshStandardMaterial({ color: 0x0a1828, roughness: 0.3, metalness: 0.9 })
+    MAT.pedestal
   )
   pedestal.receiveShadow = true
   pedestal.castShadow = true
+  pedestal.userData.persistent = true
   scene.add(pedestal)
 
-  // Pedestal ring glow
   const pedRing = new Mesh(
     new TorusGeometry(2.6, 0.05, 6, 64),
-    glowMat(0x003355, 0x00aaff)
+    MAT.ringAmber
   )
   pedRing.rotation.x = Math.PI / 2
   pedRing.position.y = 0.22
+  pedRing.userData.persistent = true
   scene.add(pedRing)
 
-  // Overhead floodlights
-  for (let a = 0; a < 4; a++) {
-    const angle = (a / 4) * Math.PI * 2
-    const flood = new SpotLight(0xfff0e0, 1.6, 34, Math.PI / 5, 0.35)
-    flood.position.set(Math.sin(angle) * 8, 12, Math.cos(angle) * 8)
-    flood.target.position.set(0, 0, 0)
-    flood.castShadow = a === 0
-    scene.add(flood)
-    scene.add(flood.target)
-  }
-
-  // Side walls with status screens
+  // Side walls + status screens (instanced).
+  const screenMatrices = []
   for (const [x, rx] of [[-18, 0], [18, Math.PI]]) {
-    const wallPanel = new Mesh(new PlaneGeometry(30, 12), new MeshStandardMaterial({ color: 0x040c18 }))
-    wallPanel.position.set(x, 6, 0)
-    wallPanel.rotation.y = rx
-    scene.add(wallPanel)
+    const wall = new Mesh(new PlaneGeometry(30, 12), MAT.panel)
+    wall.position.set(x, 6, 0)
+    wall.rotation.y = rx
+    wall.userData.persistent = true
+    scene.add(wall)
+    const colors = [0x002288, 0x008822, 0x882200]
     for (let i = 0; i < 3; i++) {
       const scr = new Mesh(
         new BoxGeometry(5, 3.5, 0.1),
-        new MeshStandardMaterial({ color: 0x001122, emissive: [0x002288, 0x008822, 0x882200][i], emissiveIntensity: 0.7 })
+        new MeshStandardMaterial({ color: 0x001122, emissive: colors[i], emissiveIntensity: 0.7 })
       )
       scr.position.set(x + (rx ? -0.1 : 0.1), 7, -6 + i * 6)
       scr.rotation.y = rx
+      scr.userData.persistent = true
       scene.add(scr)
     }
   }
 
-  scene.add(new HemisphereLight(0xd9ecff, 0x1d3040, 0.9))
-  scene.add(new AmbientLight(0x21364a, 0.85))
-  const front = new DirectionalLight(0xffffff, 1.6)
-  front.position.set(5, 12, 18)
-  scene.add(front)
-  makePoint(scene, 0x79e7ff, 0.9, [0, 9, 10], 26)
-  makePoint(scene, 0xffb64d, 0.55, [-6, 5, 8], 18)
-  makeStars(scene)
+  addStars(scene)
 }
 
 // ─────────────────────────────────────────────────────────────
-//  TEST FACILITY SCENE — Full launch complex
+//  FACILITY SCENE — Full launch complex
 // ─────────────────────────────────────────────────────────────
 export function buildFacilityScene(scene) {
   scene.background = new Color(0x061728)
   scene.fog = new FogExp2(0x061728, 0.007)
 
-  const objs = { collidables: [] }
+  const objs = { floors: [], boxes: [] }
 
-  // ── Ground plane ──
-  const ground = new Mesh(
-    new PlaneGeometry(400, 400, 16, 16),
-    new MeshStandardMaterial({ color: 0x345035, roughness: 1.0, metalness: 0.0 })
-  )
+  // ── Ground ──
+  const ground = new Mesh(new PlaneGeometry(400, 400), MAT.ground)
   ground.rotation.x = -Math.PI / 2
   ground.receiveShadow = true
+  ground.userData.persistent = true
   scene.add(ground)
   objs.ground = ground
 
-  // ── Concrete launchpad ──
-  const launchpad = new Mesh(
-    new CylinderGeometry(18, 18, 0.6, 32),
-    concreteMat()
-  )
+  // ── Launchpad (cylinder floor) ──
+  const launchpad = new Mesh(new CylinderGeometry(18, 18, 0.6, 32), MAT.concrete)
   launchpad.receiveShadow = true
   launchpad.castShadow = true
+  launchpad.userData.persistent = true
   scene.add(launchpad)
-  objs.collidables.push(launchpad)
+  objs.floors.push(launchpad)
 
-  // Blast trench
-  const trench = new Mesh(
-    new BoxGeometry(5, 2, 25),
-    new MeshStandardMaterial({ color: 0x1a1a1a, roughness: 1.0 })
-  )
-  trench.position.set(0, -1.2, 10)
-  scene.add(trench)
-
-  // Launchpad surface marks
+  // Surface marks.
   const markMat = new MeshBasicMaterial({ color: 0x666655 })
-  for (let r of [4, 8, 12]) {
+  for (const r of [4, 8, 12]) {
     const circle = new Mesh(new TorusGeometry(r, 0.1, 4, 64), markMat)
     circle.rotation.x = -Math.PI / 2
     circle.position.y = 0.35
+    circle.userData.persistent = true
     scene.add(circle)
   }
 
-  // ── Launch Tower ──
+  // ── Launch tower columns ──
   const towerX = -12
-  // Main columns (4)
-  for (let ix = 0; ix < 2; ix++) for (let iz = 0; iz < 2; iz++) {
-    const col = new Mesh(
-      new BoxGeometry(0.8, 50, 0.8),
-      metalMat(0x445566)
-    )
-    col.position.set(towerX - 2 + ix * 4, 25, -2 + iz * 4)
-    col.castShadow = true
-    scene.add(col)
-    objs.collidables.push(col)
+  for (let ix = 0; ix < 2; ix++) {
+    for (let iz = 0; iz < 2; iz++) {
+      const col = new Mesh(new BoxGeometry(0.8, 50, 0.8), MAT.metalDark)
+      col.position.set(towerX - 2 + ix * 4, 25, -2 + iz * 4)
+      col.castShadow = true
+      col.userData.persistent = true
+      scene.add(col)
+      objs.boxes.push(col)
+    }
   }
 
-  // Tower floors / platforms
+  // Tower platforms every 6m.
   for (let y = 0; y <= 50; y += 6) {
-    const platform = new Mesh(
-      new BoxGeometry(5, 0.2, 5),
-      metalMat(0x586b78)
-    )
+    const platform = new Mesh(new BoxGeometry(5, 0.2, 5), MAT.metalMid)
     platform.position.set(towerX, y, 0)
     platform.castShadow = true
     platform.receiveShadow = true
+    platform.userData.persistent = true
     scene.add(platform)
-    objs.collidables.push(platform)
+    objs.floors.push(platform)
   }
 
-  // Swing arm at top
-  const arm = new Mesh(
-    new BoxGeometry(12, 0.3, 1.0),
-    metalMat(0x7890a0)
-  )
+  // Swing arm.
+  const arm = new Mesh(new BoxGeometry(12, 0.3, 1.0), MAT.metalLight)
   arm.position.set(towerX + 4, 48, 0)
+  arm.userData.persistent = true
   scene.add(arm)
 
-  // Tower ladder
-  for (let rung = 0; rung < 25; rung++) {
-    const r = new Mesh(new CylinderGeometry(0.05, 0.05, 4.2, 4), metalMat(0x556677))
-    r.rotation.z = Math.PI / 2
-    r.position.set(towerX - 3.1, 1 + rung * 2, 0)
-    scene.add(r)
+  // Tower ladder rungs (instanced).
+  const rungGeo = new CylinderGeometry(0.05, 0.05, 4.2, 4)
+  const rungCount = 25
+  const rungs = new InstancedMesh(rungGeo, MAT.metalRung, rungCount)
+  const dummy = new Object3D()
+  for (let i = 0; i < rungCount; i++) {
+    dummy.position.set(towerX - 3.1, 1 + i * 2, 0)
+    dummy.rotation.set(0, 0, Math.PI / 2)
+    dummy.updateMatrix()
+    rungs.setMatrixAt(i, dummy.matrix)
   }
+  rungs.userData.persistent = true
+  scene.add(rungs)
 
-  // Tower lights (warning strobes)
+  // Tower strobes.
   for (let y = 10; y <= 50; y += 10) {
-    const strobe = new Mesh(new SphereGeometry(0.2, 6, 6), new MeshStandardMaterial({ emissive: 0xff2200, emissiveIntensity: 1 }))
+    const strobe = new Mesh(new SphereGeometry(0.2, 6, 6), MAT.strobe)
     strobe.position.set(towerX - 2.5, y, 0)
+    strobe.userData.persistent = true
     scene.add(strobe)
   }
 
-  // ── Mission Control Building ──
-  const mcBase = new Mesh(
-    new BoxGeometry(24, 8, 16),
-    new MeshStandardMaterial({ color: 0x79848d, roughness: 0.86, metalness: 0.06 })
-  )
+  // ── Mission Control building ──
+  const mcBase = new Mesh(new BoxGeometry(24, 8, 16), MAT.concrete)
   mcBase.position.set(-50, 4, -15)
   mcBase.castShadow = true
   mcBase.receiveShadow = true
+  mcBase.userData.persistent = true
   scene.add(mcBase)
-  objs.collidables.push(mcBase)
+  objs.boxes.push(mcBase)
 
-  // MC Windows
   for (let i = 0; i < 8; i++) {
-    const win = new Mesh(new BoxGeometry(2, 1.5, 0.1), glassMat())
+    const win = new Mesh(new BoxGeometry(2, 1.5, 0.1), MAT.glass)
     win.position.set(-50 - 10 + i * 3, 5, -7)
+    win.userData.persistent = true
     scene.add(win)
-    const glow = new Mesh(new BoxGeometry(1.8, 1.3, 0.05), new MeshStandardMaterial({ emissive: 0xffaa44, emissiveIntensity: 0.6 }))
+    const glow = new Mesh(
+      new BoxGeometry(1.8, 1.3, 0.05),
+      new MeshStandardMaterial({ emissive: 0xffaa44, emissiveIntensity: 0.6 })
+    )
     glow.position.set(-50 - 10 + i * 3, 5, -7.1)
+    glow.userData.persistent = true
     scene.add(glow)
   }
-
-  // MC sign light
-  makePoint(scene, 0xffaa44, 1.0, [-50, 9, -7], 20)
 
   const sign = new Mesh(
     new BoxGeometry(12, 1, 0.12),
     new MeshStandardMaterial({ color: 0x112238, emissive: 0x0aa7ff, emissiveIntensity: 0.55 })
   )
   sign.position.set(-50, 8.9, -6.88)
+  sign.userData.persistent = true
   scene.add(sign)
 
-  // MC roof antenna
-  const antenna = new Mesh(new CylinderGeometry(0.06, 0.06, 6, 6), metalMat())
+  const antenna = new Mesh(new CylinderGeometry(0.06, 0.06, 6, 6), MAT.antenna)
   antenna.position.set(-50, 11, -15)
+  antenna.userData.persistent = true
   scene.add(antenna)
-  const antennaBall = new Mesh(new SphereGeometry(0.2, 8, 8), glowMat(0x440000, 0xff0000))
+  const antennaBall = new Mesh(
+    new SphereGeometry(0.2, 8, 8),
+    new MeshStandardMaterial({ color: 0x440000, emissive: 0xff0000, emissiveIntensity: 1 })
+  )
   antennaBall.position.set(-50, 14.1, -15)
+  antennaBall.userData.persistent = true
   scene.add(antennaBall)
 
-  // ── Fuel tanks / support structures ──
+  // ── Fuel tanks ──
   for (const [x, z, r, h] of [[10, -20, 3, 12], [20, -10, 2, 8], [15, -30, 2.5, 10]]) {
-    const tank = new Mesh(
-      new CylinderGeometry(r, r, h, 16),
-      new MeshStandardMaterial({ color: 0xd6e1e8, roughness: 0.35, metalness: 0.72 })
-    )
+    const tank = new Mesh(new CylinderGeometry(r, r, h, 16), MAT.tankBody)
     tank.position.set(x, h / 2, z)
     tank.castShadow = true
+    tank.userData.persistent = true
     scene.add(tank)
-    objs.collidables.push(tank)
+    objs.boxes.push(tank)
   }
 
-  // ── Perimeter fence ──
-  for (let a = 0; a < 40; a++) {
-    const post = new Mesh(new BoxGeometry(0.15, 2.5, 0.15), metalMat(0x556677))
-    const angle = (a / 40) * Math.PI * 2
-    post.position.set(Math.sin(angle) * 90, 1.25, Math.cos(angle) * 90)
-    scene.add(post)
+  // ── Perimeter fence (instanced) ──
+  const fenceGeo = new BoxGeometry(0.15, 2.5, 0.15)
+  const fenceCount = 40
+  const fence = new InstancedMesh(fenceGeo, MAT.postFence, fenceCount)
+  for (let i = 0; i < fenceCount; i++) {
+    const angle = (i / fenceCount) * Math.PI * 2
+    dummy.position.set(Math.sin(angle) * 90, 1.25, Math.cos(angle) * 90)
+    dummy.rotation.set(0, -angle, 0)
+    dummy.updateMatrix()
+    fence.setMatrixAt(i, dummy.matrix)
   }
+  fence.userData.persistent = true
+  scene.add(fence)
 
-  // ── Road to complex ──
-  const road = new Mesh(new PlaneGeometry(12, 120), new MeshStandardMaterial({ color: 0x20242a, roughness: 0.95 }))
+  // ── Road ──
+  const road = new Mesh(new PlaneGeometry(12, 120), MAT.road)
   road.rotation.x = -Math.PI / 2
   road.position.set(30, 0.01, 10)
   road.rotation.z = Math.PI * 0.15
+  road.userData.persistent = true
   scene.add(road)
 
-  // ── Lighting ──
-  makeSun(scene)
-  const moonLight = new DirectionalLight(0x668cff, 0.45)
-  moonLight.position.set(-60, 40, -40)
-  scene.add(moonLight)
+  // ── Directional sun (single light, casts shadows). ──
+  const sun = new DirectionalLight(0xfff0d0, 1.2)
+  sun.position.set(40, 60, 30)
+  sun.castShadow = true
+  sun.shadow.mapSize.set(1024, 1024)
+  sun.shadow.camera.near = 0.5
+  sun.shadow.camera.far  = 200
+  sun.shadow.camera.left = -80
+  sun.shadow.camera.right = 80
+  sun.shadow.camera.top = 80
+  sun.shadow.camera.bottom = -80
+  sun.shadow.bias = -0.0005
+  sun.userData.persistent = true
+  scene.add(sun)
 
-  scene.add(new HemisphereLight(0x9fbfff, 0x21381f, 0.85))
-  scene.add(new AmbientLight(0x102036, 0.45))
+  addStars(scene)
 
-  // Floodlights around pad
-  for (let i = 0; i < 4; i++) {
-    const angle = (i / 4) * Math.PI * 2
-    const fl = new SpotLight(0xffeedd, 1.2, 80, Math.PI / 7, 0.4)
-    fl.position.set(Math.sin(angle) * 24, 18, Math.cos(angle) * 24)
-    fl.target.position.set(0, 0, 0)
-    fl.castShadow = false
-    scene.add(fl); scene.add(fl.target)
-  }
-
-  makeStars(scene)
   return objs
 }
-

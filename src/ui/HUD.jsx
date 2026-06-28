@@ -1,30 +1,29 @@
-import React, { useRef } from 'react'
+import React, { memo, useRef, useCallback } from 'react'
 import { sound } from '../sound.js'
 
-export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket, launchReady, consoleProgress }) {
+function HUD({ deck, position, onExitToMenu, onLaunch, insideRocket, launchReady, consoleProgress }) {
   const pos = position || { x: 0, y: 0, z: 0 }
   const lastTouchAction = useRef(0)
 
-  function runAction(action) {
+  const runAction = useCallback((action) => {
     sound.play('click')
     action?.()
-  }
+  }, [])
 
-  function handleTouchAction(event, action) {
+  const handleTouchAction = useCallback((event, action) => {
     if (event.pointerType !== 'touch') return
     event.preventDefault()
     lastTouchAction.current = performance.now()
     runAction(action)
-  }
+  }, [runAction])
 
-  function handleClickAction(action) {
+  const handleClickAction = useCallback((action) => {
     if (performance.now() - lastTouchAction.current < 500) return
     runAction(action)
-  }
+  }, [runAction])
 
   return (
     <div className="hud">
-      {/* Top-left status */}
       <div className="hud-top">
         <div className="hud-panel">
           {insideRocket ? (
@@ -48,7 +47,6 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
           </div>
         </div>
 
-        {/* Top-right — suit status */}
         <div className="hud-panel" style={{ alignItems: 'flex-end' }}>
           <div className="label-xs">Suit Systems</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
@@ -68,9 +66,7 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
         </div>
       </div>
 
-      {/* Bottom */}
       <div className="hud-bottom">
-        {/* Controls guide */}
         <div className="hud-panel">
           <div className="label-xs" style={{ marginBottom: 6 }}>Controls</div>
           <div className="controls-guide">
@@ -83,7 +79,6 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
           </div>
         </div>
 
-        {/* Action buttons */}
         <div className="hud-actions">
           <button
             id="hud-launch-btn"
@@ -107,3 +102,5 @@ export default function HUD({ deck, position, onExitToMenu, onLaunch, insideRock
     </div>
   )
 }
+
+export default memo(HUD)
