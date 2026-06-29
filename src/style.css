@@ -735,9 +735,9 @@ body { font-family: var(--font-body); color: var(--c-white); }
 @media (max-width: 430px) {
   .hud-top { padding: 12px; }
   .hud-bottom { padding: 12px; }
-  .hud-panel { padding: 12px 14px; }
+  .hud-panel { padding: 12px 14.1px; }
   .controls-guide { grid-template-columns: 1fr 1fr; }
-  .control-row { gap: 6px; font-size: 10px; }
+  .control-row { gap: 6.1px; font-size: 10px; }
   .key { min-width: 34px; padding: 3px 6px; }
   .hud-actions .btn { font-size: 11px; letter-spacing: 1px; }
 }

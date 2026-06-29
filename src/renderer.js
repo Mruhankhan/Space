@@ -9,7 +9,7 @@ import {
   PerspectiveCamera,
   Scene,
   WebGLRenderer,
-  PCFSoftShadowMap,
+  BasicShadowMap,
   ACESFilmicToneMapping,
   SRGBColorSpace,
   Vector3,
@@ -63,13 +63,11 @@ export const renderer = {
       alpha: false,
       powerPreference: 'high-performance',
       stencil: false,
-      // Required for renderer.getCanvasDataURL() to read pixels after render.
-      preserveDrawingBuffer: true,
     })
     _renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     _renderer.setSize(window.innerWidth, window.innerHeight)
     _renderer.shadowMap.enabled = true
-    _renderer.shadowMap.type = PCFSoftShadowMap
+    _renderer.shadowMap.type = BasicShadowMap
     _renderer.toneMapping = ACESFilmicToneMapping
     _renderer.toneMappingExposure = 1.25
     _renderer.outputColorSpace = SRGBColorSpace
@@ -183,14 +181,15 @@ export const renderer = {
 
   /**
    * Snapshot the current rendered frame as a PNG data URL.
-   * Used by the result-share flow.
-   * `preserveDrawingBuffer` would let us read at any time; without it,
-   * the caller should request immediately after a render call.
+   * Without preserveDrawingBuffer the canvas is cleared after compositing,
+   * so we render a fresh frame immediately before reading pixels.
    */
   getCanvasDataURL(type = 'image/png', quality = 0.92) {
     if (!_renderer) return null
-    const c = _renderer.domElement
-    try { return c.toDataURL(type, quality) }
+    try {
+      _renderer.render(_scene, _camera)
+      return _renderer.domElement.toDataURL(type, quality)
+    }
     catch (e) { console.error('[renderer] getCanvasDataURL failed', e); return null }
   },
 }

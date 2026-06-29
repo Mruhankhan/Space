@@ -199,7 +199,6 @@ export function buildHangarScene(scene) {
     MAT.pedestal
   )
   pedestal.receiveShadow = true
-  pedestal.castShadow = true
   pedestal.userData.persistent = true
   scene.add(pedestal)
 
@@ -277,7 +276,6 @@ export function buildFacilityScene(scene) {
     for (let iz = 0; iz < 2; iz++) {
       const col = new Mesh(new BoxGeometry(0.8, 50, 0.8), MAT.metalDark)
       col.position.set(towerX - 2 + ix * 4, 25, -2 + iz * 4)
-      col.castShadow = true
       col.userData.persistent = true
       scene.add(col)
       objs.boxes.push(col)
@@ -288,7 +286,6 @@ export function buildFacilityScene(scene) {
   for (let y = 0; y <= 50; y += 6) {
     const platform = new Mesh(new BoxGeometry(5, 0.2, 5), MAT.metalMid)
     platform.position.set(towerX, y, 0)
-    platform.castShadow = true
     platform.receiveShadow = true
     platform.userData.persistent = true
     scene.add(platform)
@@ -326,7 +323,6 @@ export function buildFacilityScene(scene) {
   // ── Mission Control building ──
   const mcBase = new Mesh(new BoxGeometry(24, 8, 16), MAT.concrete)
   mcBase.position.set(-50, 4, -15)
-  mcBase.castShadow = true
   mcBase.receiveShadow = true
   mcBase.userData.persistent = true
   scene.add(mcBase)
@@ -370,7 +366,6 @@ export function buildFacilityScene(scene) {
   for (const [x, z, r, h] of [[10, -20, 3, 12], [20, -10, 2, 8], [15, -30, 2.5, 10]]) {
     const tank = new Mesh(new CylinderGeometry(r, r, h, 16), MAT.tankBody)
     tank.position.set(x, h / 2, z)
-    tank.castShadow = true
     tank.userData.persistent = true
     scene.add(tank)
     objs.boxes.push(tank)
@@ -402,7 +397,7 @@ export function buildFacilityScene(scene) {
   const sun = new DirectionalLight(0xfff0d0, 1.2)
   sun.position.set(40, 60, 30)
   sun.castShadow = true
-  sun.shadow.mapSize.set(1024, 1024)
+  sun.shadow.mapSize.set(512, 512)
   sun.shadow.camera.near = 0.5
   sun.shadow.camera.far  = 200
   sun.shadow.camera.left = -80

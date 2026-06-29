@@ -121,6 +121,13 @@ class Game {
         buildHangarScene(renderer.scene)
         const rocketConfig = payload.rocket || this.activeRocket || getRockets()[0]
         this.activeRocket = rocketConfig
+        // Remove any stale rocket from previous state.
+        if (this._rocket) {
+          renderer.disposeObject(this._rocket)
+          renderer.scene.remove(this._rocket)
+          this._rocket = null
+        }
+        this._broadcast(STATES.HANGAR, { rocketLoading: true })
         // loadRocket falls back to buildRocket if any .glb is missing.
         loadRocket(rocketConfig).then(rocket => {
           if (this.state !== STATES.HANGAR) return
@@ -132,13 +139,8 @@ class Game {
           this._rocket.position.set(0, 0.2, 0)
           renderer.scene.add(this._rocket)
           this._cacheRocketAnimations()
+          this._broadcast(STATES.HANGAR, { rocketLoading: false })
         })
-        // Also build the procedural rocket synchronously so the hangar has
-        // *something* visible during the load.
-        this._rocket = buildRocket(rocketConfig)
-        this._rocket.position.set(0, 0.2, 0)
-        renderer.scene.add(this._rocket)
-        this._cacheRocketAnimations()
         input.disable()
         sound.setAmbient('hangar')
         renderer.camera.position.set(7, 8, 22)
@@ -167,6 +169,20 @@ class Game {
         this.activeRocket = rocketConfig
         this.currentMission = generateMission({ rocketId: rocketConfig.id })
 
+        // Remove any stale rocket from previous state.
+        if (this._rocket) {
+          renderer.disposeObject(this._rocket)
+          renderer.scene.remove(this._rocket)
+          this._rocket = null
+        }
+
+        this._broadcast(STATES.FACILITY, {
+          launchReady: false,
+          consoleProgress: 'Loading rocket…',
+          rocketLoading: true,
+          mission: this.currentMission,
+        })
+
         // loadRocket falls back to buildRocket if any .glb is missing.
         loadRocket(rocketConfig).then(rocket => {
           if (this.state !== STATES.FACILITY) return
@@ -185,15 +201,9 @@ class Game {
             consoleProgress: this._rocketConsoleCount > 0
               ? `0/${this._rocketConsoleCount} systems online`
               : 'No system checks required',
+            rocketLoading: false,
           })
         })
-        // Procedural rocket visible immediately.
-        this._rocket = buildRocket(rocketConfig)
-        this._rocket.position.set(0, 0.3, 0)
-        renderer.scene.add(this._rocket)
-        this._cacheRocketAnimations()
-        this._registerRocketColliders()
-        this._prepareRocketConsoleState()
 
         this._character = new Character(renderer.scene)
         this._character.setPosition(8, 1, 8)
@@ -208,13 +218,6 @@ class Game {
         sound.setAmbient('facility')
         input.requestPointerLock()
 
-        this._broadcast(STATES.FACILITY, {
-          launchReady: this._canLaunch(),
-          consoleProgress: this._rocketConsoleCount > 0
-            ? `0/${this._rocketConsoleCount} systems online`
-            : 'No system checks required',
-          mission: this.currentMission,
-        })
         break
       }
 

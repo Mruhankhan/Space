@@ -28,12 +28,12 @@ const MAX_SLOPE_COS    = Math.cos(Math.PI / 4)
 
 const COYOTE_TIME      = 0.12   // seconds after leaving ground you can still jump
 const JUMP_BUFFER      = 0.14   // seconds before landing jump is buffered
-const MOUSE_SENS       = 0.005
+const MOUSE_SENS       = 0.0024
 const PAD_SENS         = 0.045
 const CAMERA_HEIGHT    = 0.62   // above feet
 const CAMERA_BACK      = 2.4
-const MIN_PITCH        = -1.45
-const MAX_PITCH        = 1.45
+const MIN_PITCH        = -1.30
+const MAX_PITCH        = 1.30
 
 const DECK_HEIGHTS     = [3.25, 10.25, 18.25]
 
@@ -331,8 +331,10 @@ export class Character {
       this.position.z - cosY * camDist,
     )
 
-    // Yaw + pitch directly via Euler — lookAt would be cancelled by the
-    // rotation assignment below, so we skip it and use 'YXZ' order.
+    const lookAtX = this.position.x - sinY * 1.0
+    const lookAtY = this.position.y + PLAYER_EYE_OFFSET * 0.55 + sinP * 1.2
+    const lookAtZ = this.position.z - cosY * 1.0
+    camera.lookAt(lookAtX, lookAtY, lookAtZ)
     camera.rotation.order = 'YXZ'
     camera.rotation.y = this._yaw
     camera.rotation.x = this._pitch
@@ -361,6 +363,8 @@ export class Character {
       }
     }
   }
+
+
 
   enterRocket() {
     this.insideRocket = true
@@ -394,7 +398,7 @@ export class Character {
   }
 
   // Read-only accessors for UI broadcast.
-  snapshot() {
+snapshot() {
     return {
       x: this.position.x,
       y: this.position.y,
@@ -404,3 +408,5 @@ export class Character {
     }
   }
 }
+
+

@@ -172,7 +172,7 @@ function buildCabin() {
     g.add(mesh(new CylinderGeometry(0.04, 0.04, 0.5, 4), standardMat(0x334455, { metalness: 0.6 }), 0.8, 10.5 + i * 0.8, 0, `ladder-${i}`))
   }
   // Hatch.
-  g.add(mesh(new CylinderGeometry(0.35, 0.35, 0.08, 12), standardMat(0x223344, { metalness: 0.6 }), 0, 10.04, 0.65, 'hatch'))
+  g.add(mesh(new CylinderGeometry(0.36, 0.35, 0.08, 12), standardMat(0x223344, { metalness: 0.6 }), 0, 10.04, 0.65, 'hatch'))
   return g
 }
 
