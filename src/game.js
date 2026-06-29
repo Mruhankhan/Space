@@ -9,7 +9,6 @@ import { input }        from './input.js'
 import { sound }        from './sound.js'
 import { particles }    from './particles.js'
 import { buildMenuScene, buildHangarScene, buildFacilityScene } from './world.js'
-import { buildRocket }  from './rocket.js'
 import { Character }    from './character.js'
 import { Launch }       from './launch.js'
 import { getRockets }   from './save.js'
@@ -523,11 +522,21 @@ class Game {
     if (this._rocket) {
       renderer.disposeObject(this._rocket)
       renderer.scene.remove(this._rocket)
+      this._rocket = null
     }
-    this._rocket = buildRocket(config)
-    this._rocket.position.set(0, 0.2, 0)
-    renderer.scene.add(this._rocket)
-    this._cacheRocketAnimations()
+    this._broadcast(STATES.HANGAR, { rocketLoading: true })
+    loadRocket(config).then(rocket => {
+      if (this.state !== STATES.HANGAR) return
+      if (this._rocket) {
+        renderer.disposeObject(this._rocket)
+        renderer.scene.remove(this._rocket)
+      }
+      this._rocket = rocket
+      this._rocket.position.set(0, 0.2, 0)
+      renderer.scene.add(this._rocket)
+      this._cacheRocketAnimations()
+      this._broadcast(STATES.HANGAR, { rocketLoading: false })
+    })
   }
 
   returnToMenu() { this.transition(STATES.MAIN_MENU) }
