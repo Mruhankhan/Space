@@ -1,33 +1,82 @@
-// physics.js — capsule controller + swept collision
-// No revert-style AABB. Uses a vertical capsule with sphere-swept sliding,
-// ground test via downward sphere cast, slope handling up to SLOPE_LIMIT.
+// physics.js — capsule controller + swept collision with 8x8 grid broadphase
+// Static collision world is partitioned into an 8x8 grid for O(1) queries.
 
 import { Vector3 } from 'three'
 
 // ── Capsule geometry (player) ──────────────────────────────
 export const CAPSULE_RADIUS  = 0.34
-export const CAPSULE_HEIGHT  = 1.55  // body cylinder length (excludes hemispheres)
+export const CAPSULE_HEIGHT  = 1.55
 export const CAPSULE_TOTAL   = CAPSULE_HEIGHT + CAPSULE_RADIUS * 2
 
-// Player center is offset up by (CAPSULE_TOTAL/2) from feet position.
 export const PLAYER_EYE_OFFSET = CAPSULE_TOTAL * 0.85
 
-const MAX_SLOPE = Math.cos(Math.PI / 4) // walkable slope angle (45°)
-const SKIN      = 0.015                  // collision skin to avoid sticking
+const MAX_SLOPE = Math.cos(Math.PI / 4)
+const SKIN      = 0.015
+
+// ── Grid config ─────────────────────────────────────────────
+const GRID_CX = 8
+const GRID_CZ = 8
+const GRID_MIN_X = -250
+const GRID_MIN_Z = -250
+const GRID_MAX_X = 250
+const GRID_MAX_Z = 250
+const CELL_W = (GRID_MAX_X - GRID_MIN_X) / GRID_CX  // 62.5
+const CELL_D = (GRID_MAX_Z - GRID_MIN_Z) / GRID_CZ  // 62.5
 
 // ── Static collision world ─────────────────────────────────
 const _world = {
-  spheres: [], // { x, y, z, r }
-  boxes:   [], // { minX, minY, minZ, maxX, maxY, maxZ, tag }
-  floors:  [], // { minX, minY, minZ, maxX, maxY, maxZ } floor surfaces
-  shells:  [], // tall hollow boxes — ignored while insideRocket
+  spheres: [],
+  boxes:   [],
+  floors:  [],
+  shells:  [],
+  grid:    [],
 }
+
+let _nearby = { boxes: [], floors: [] }
 
 // Reusable scratch vectors.
 const _v1 = new Vector3()
 const _v2 = new Vector3()
 const _v3 = new Vector3()
 const _v4 = new Vector3()
+
+function _cellCoord(x, z) {
+  const cx = Math.max(0, Math.min(GRID_CX - 1, Math.floor((x - GRID_MIN_X) / CELL_W)))
+  const cz = Math.max(0, Math.min(GRID_CZ - 1, Math.floor((z - GRID_MIN_Z) / CELL_D)))
+  return { x: cx, z: cz }
+}
+
+function _addToGrid(entry, type) {
+  const { x: xMin, z: zMin } = _cellCoord(entry.minX, entry.minZ)
+  const { x: xMax, z: zMax } = _cellCoord(entry.maxX, entry.maxZ)
+  for (let cx = xMin; cx <= xMax; cx++) {
+    for (let cz = zMin; cz <= zMax; cz++) {
+      const idx = cx + cz * GRID_CX
+      if (!_world.grid[idx]) _world.grid[idx] = []
+      _world.grid[idx].push({ entry, type })
+    }
+  }
+}
+
+function _getNearby(px, pz) {
+  const { x: cx, z: cz } = _cellCoord(px, pz)
+  const boxSet = new Set()
+  const floorSet = new Set()
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const nx = cx + dx
+      const nz = cz + dz
+      if (nx < 0 || nx >= GRID_CX || nz < 0 || nz >= GRID_CZ) continue
+      const cell = _world.grid[nx + nz * GRID_CX]
+      if (!cell) continue
+      for (const item of cell) {
+        if (item.type === 'floor') floorSet.add(item.entry)
+        else boxSet.add(item.entry)
+      }
+    }
+  }
+  return { boxes: [...boxSet], floors: [...floorSet] }
+}
 
 export const physics = {
   async init() {},
@@ -39,6 +88,7 @@ export const physics = {
     _world.boxes.length   = 0
     _world.floors.length  = 0
     _world.shells.length  = 0
+    _world.grid.length    = 0
   },
 
   addStatic(mesh, options = {}) {
@@ -49,7 +99,6 @@ export const physics = {
     geom.computeBoundingBox()
     const box = geom.boundingBox
     if (!box) return
-    // Bake world AABB once.
     const min = box.min.clone().applyMatrix4(mesh.matrixWorld)
     const max = box.max.clone().applyMatrix4(mesh.matrixWorld)
     const entry = {
@@ -58,23 +107,21 @@ export const physics = {
     }
     const tag = options.tag || (options.ignoreWhenInside ? 'shell' : 'box')
     if (tag === 'shell') _world.shells.push(entry)
-    else if (tag === 'floor') _world.floors.push(entry)
-    else _world.boxes.push(entry)
+    else if (tag === 'floor') {
+      _world.floors.push(entry)
+      _addToGrid(entry, 'floor')
+    } else {
+      _world.boxes.push(entry)
+      _addToGrid(entry, 'box')
+    }
   },
 
   addFloorBox(minX, minY, minZ, maxX, maxY, maxZ) {
-    _world.floors.push({ minX, minY, minZ, maxX, maxY, maxZ })
+    const entry = { minX, minY, minZ, maxX, maxY, maxZ }
+    _world.floors.push(entry)
+    _addToGrid(entry, 'floor')
   },
 
-  /**
-   * Move a vertical capsule with sphere-swept sliding.
-   * Position is the FEET position of the capsule (bottom sphere center).
-   *
-   * @param {Vector3} feet  - mutated in place
-   * @param {Vector3} velocity
-   * @param {number} delta
-   * @param {object} options - { insideRocket, gravity, slopeLimit }
-   */
   characterMove(feet, velocity, delta, options = {}) {
     const insideRocket = !!options.insideRocket
     const gravity      = options.gravity !== undefined ? options.gravity : -22.0
@@ -82,30 +129,27 @@ export const physics = {
     const r = CAPSULE_RADIUS
     const halfHeight = CAPSULE_HEIGHT * 0.5
 
-    // Center of capsule for sphere sweeps.
     const cx = feet.x
     const cy = feet.y + r + halfHeight
     const cz = feet.z
 
-    // ── Apply gravity ──
+    // Update broadphase neighbourhood once per frame.
+    _nearby = _getNearby(feet.x, feet.z)
+
     velocity.y += gravity * delta
 
-    // ── Compute desired move per axis ──
     const dx = velocity.x * delta
     const dy = velocity.y * delta
     const dz = velocity.z * delta
 
-    // ── Ground test (downward sphere from capsule center) ──
     let grounded = false
     let groundY  = feet.y
 
-    // ── Slide move X ──
     if (dx !== 0) {
       const hit = this._sphereSlideAxis(cx, cy, cz, dx, 0, 0, r, halfHeight, insideRocket)
       if (hit.moved) {
         feet.x = hit.x
       } else {
-        // Try slope step: nudge upward to ride slopes, then retry XZ slide.
         const stepResult = this._tryStepUp(cx, cy, cz, dx, dz, r, halfHeight, insideRocket)
         if (stepResult.moved) {
           feet.x = stepResult.x
@@ -117,7 +161,6 @@ export const physics = {
       }
     }
 
-    // ── Slide move Z ──
     if (dz !== 0) {
       const hit = this._sphereSlideAxis(feet.x, feet.y + r + halfHeight, feet.z, 0, 0, dz, r, halfHeight, insideRocket)
       if (hit.moved) {
@@ -127,7 +170,6 @@ export const physics = {
       }
     }
 
-    // ── Move Y ──
     const newCx = feet.x
     const newCyStart = feet.y + r + halfHeight
     const newCz = feet.z
@@ -149,7 +191,6 @@ export const physics = {
       }
     }
 
-    // ── Ground snap test (raycast sphere) ──
     if (!grounded) {
       const snap = this._groundProbe(feet.x, feet.y + r + halfHeight, feet.z, r, halfHeight, insideRocket)
       if (snap.hit) {
@@ -166,9 +207,6 @@ export const physics = {
     return { grounded, groundY, velocity }
   },
 
-  /**
-   * Ground probe — returns surface Y under the capsule, or null.
-   */
   groundY(feet, insideRocket = false) {
     const r = CAPSULE_RADIUS
     const halfHeight = CAPSULE_HEIGHT * 0.5
@@ -181,10 +219,7 @@ export const physics = {
     return best === -Infinity ? -Infinity : best
   },
 
-  // ── Internals ─────────────────────────────────────────────
   _sphereSlideAxis(cx, cy, cz, dx, dy, dz, r, halfHeight, insideRocket) {
-    // Capsule is approximated by two sphere centers (top + bottom).
-    // Test each sphere against static boxes; on hit, slide along the surface.
     let x = cx, y = cy, z = cz
     let moved = false
 
@@ -197,7 +232,6 @@ export const physics = {
                    y: dy === 0 ? 0 : (dy > 0 ? 1 : -1),
                    z: dz === 0 ? 0 : (dz > 0 ? 1 : -1) }
 
-    // Iterate up to 6 micro-steps for sliding resolution.
     for (let i = 0; i < 6 && remaining > 1e-5; i++) {
       const step = Math.min(stepLen, remaining)
       const tx = x + sign.x * step
@@ -207,12 +241,11 @@ export const physics = {
       const top    = { x: tx, y: ty + halfHeight, z: tz }
       const bottom = { x: tx, y: ty - halfHeight, z: tz }
 
-      // Find closest box that intersects either sphere.
       let hitBox = null
       let hitSphere = null
       let hitDist = Infinity
 
-      const lists = [_world.boxes]
+      const lists = [_nearby.boxes]
       for (const list of lists) {
         for (let j = 0; j < list.length; j++) {
           const b = list[j]
@@ -234,7 +267,6 @@ export const physics = {
         continue
       }
 
-      // Compute push-out normal from the deepest penetration.
       const normal = this._resolvePenetrationNormal(hitBox, hitSphere, r)
       if (Math.abs(normal.x) > 0.001) {
         x = tx + sign.x * step + normal.x * (hitDist + SKIN)
@@ -252,10 +284,8 @@ export const physics = {
         z = tz + sign.z * step
       }
 
-      // Slide along tangent (zero out the component opposing the normal).
       const vDotN = sign.x * normal.x + sign.y * normal.y + sign.z * normal.z
       if (vDotN < 0) {
-        // Subtract the component of velocity along normal.
         const newSign = {
           x: sign.x - normal.x * vDotN,
           y: sign.y - normal.y * vDotN,
@@ -266,7 +296,6 @@ export const physics = {
           sign.x = newSign.x / newLen
           sign.y = newSign.y / newLen
           sign.z = newSign.z / newLen
-          // Stop when movement is aligned with collision normal.
           if (Math.abs(sign.x * normal.x + sign.y * normal.y + sign.z * normal.z) > 0.95) break
           remaining = Math.min(remaining, len * 0.9)
         } else {
@@ -290,7 +319,6 @@ export const physics = {
   },
 
   _sphereBoxPenetration(box, top, bottom, r, halfHeight) {
-    // Pick the deeper of top/bottom sphere penetration.
     let best = null
     let bestDist = Infinity
     for (const sphere of [top, bottom]) {
@@ -320,12 +348,11 @@ export const physics = {
     const dz = sphere.z - cz
     const d2 = dx * dx + dy * dy + dz * dz
     if (d2 < 1e-8) {
-      // Centered — pick shortest axis out.
       const dxMax = Math.min(sphere.x - box.minX, box.maxX - sphere.x)
       const dyMax = Math.min(sphere.y - box.minY, box.maxY - sphere.y)
       const dzMax = Math.min(sphere.z - box.minZ, box.maxZ - sphere.z)
       if (dxMax <= dyMax && dxMax <= dzMax) return { x: sphere.x < (box.minX + box.maxX) * 0.5 ? -1 : 1, y: 0, z: 0 }
-      if (dyMax <= dzMax) return { x: 0, y: sphere.y < (box.minY + box.maxY) * 0.5 ? -1 : 1, z: 0 }
+      if (dyMax <= dzMax) return { x: 0, y: sphere.y < (box.minY + box.maxX) * 0.5 ? -1 : 1, z: 0 }
       return { x: 0, y: 0, z: sphere.z < (box.minZ + box.maxZ) * 0.5 ? -1 : 1 }
     }
     const inv = 1.0 / Math.sqrt(d2)
@@ -333,57 +360,46 @@ export const physics = {
   },
 
   _tryStepUp(cx, cy, cz, dx, dz, r, halfHeight, insideRocket) {
-    // Try moving up by STEP_UP, then horizontally; if it lands on something, accept.
     const STEP_UP   = 0.4
-    const STEP_TEST = STEP_UP + 0.1
     const tryY = cy + STEP_UP
     const newCx = cx + dx
     const newCz = cz + dz
-    // Sphere at (newCx, tryY, newCz) — must not be inside any box.
     const top    = { x: newCx, y: tryY + halfHeight, z: newCz }
     const bottom = { x: newCx, y: tryY - halfHeight, z: newCz }
     let blocked = false
-    for (const b of _world.boxes) {
+    for (const b of _nearby.boxes) {
       if (this._sphereBoxOverlap(b, top, r) || this._sphereBoxOverlap(b, bottom, r)) {
         blocked = true
         break
       }
     }
     if (blocked) return { moved: false, x: cx, y: cy, z: cz }
-    // Check there's ground within STEP_TEST below.
     const probe = this._groundProbe(newCx, tryY, newCz, r, halfHeight, insideRocket)
     if (!probe.hit) return { moved: false, x: cx, y: cy, z: cz }
     const newFeet = probe.y
-    if (newFeet - (tryY - r - halfHeight) > STEP_TEST) return { moved: false, x: cx, y: cy, z: cz }
+    if (newFeet - (tryY - r - halfHeight) > STEP_UP + 0.1) return { moved: false, x: cx, y: cy, z: cz }
     return { moved: true, x: newCx, y: newFeet, z: newCz }
   },
 
   _groundProbe(cx, cy, cz, r, halfHeight, insideRocket) {
-    // Raycast the BOTTOM sphere downward by ~0.5 units.
-    const startY = cy - halfHeight // bottom sphere center
+    const startY = cy - halfHeight
     const endY   = startY - 0.6
     let best = null
 
-    const lists = insideRocket ? [_world.boxes, _world.floors] : [_world.floors, _world.boxes]
+    const lists = insideRocket ? [_nearby.boxes, _nearby.floors] : [_nearby.floors, _nearby.boxes]
     for (const list of lists) {
       for (let j = 0; j < list.length; j++) {
         const b = list[j]
-        // Skip box if XZ is outside.
         if (cx + r < b.minX || cx - r > b.maxX) continue
         if (cz + r < b.minZ || cz - r > b.maxZ) continue
-        // Bottom sphere must be above the box's top for there to be a hit.
         if (b.maxY < endY) continue
         if (b.maxY > startY + r) continue
-        // Intersection of vertical line with top surface = box.maxY.
         const surfaceY = b.maxY
-        if (surfaceY > startY + r) continue
         if (!best || surfaceY > best.y) best = { hit: true, y: surfaceY, box: b }
       }
     }
 
-    // Also accept box-as-floor if our top surface is reachable (a box that
-    // you can stand on because there's a flat top within reach).
-    for (const b of _world.boxes) {
+    for (const b of _nearby.boxes) {
       if (cx + r < b.minX || cx - r > b.maxX) continue
       if (cz + r < b.minZ || cz - r > b.maxZ) continue
       const topY = b.maxY
@@ -396,7 +412,6 @@ export const physics = {
     return best
   },
 
-  // ── Public queries ────────────────────────────────────────
   raycast(originX, originY, originZ, dirX, dirY, dirZ, maxDist) {
     let bestT = maxDist
     let bestNormal = null
@@ -405,7 +420,6 @@ export const physics = {
     for (const list of lists) {
       for (let i = 0; i < list.length; i++) {
         const b = list[i]
-        // Slab test against box (origin -> origin + dir * bestT).
         let tMin = -Infinity, tMax = bestT
         const o = [originX, originY, originZ]
         const d = [dirX, dirY, dirZ]
@@ -431,7 +445,6 @@ export const physics = {
             y: originY + dirY * tMin,
             z: originZ + dirZ * tMin,
           }
-          // Compute normal from which face was hit.
           const eps = 1e-3
           bestNormal = { x: 0, y: 0, z: 0 }
           if (Math.abs(bestPoint.x - b.minX) < eps) bestNormal.x = -1
@@ -447,12 +460,10 @@ export const physics = {
     return { t: bestT, point: bestPoint, normal: bestNormal }
   },
 
-  /** Cheap inside-shape test for rocket entry triggers (XZ radius + Y range). */
   insideTrigger(x, y, z, radius, yMin, yMax) {
     return (x * x + z * z) < (radius * radius) && y >= yMin && y <= yMax
   },
 
-  /** For nearby-interact lookup of consoles/objects. */
   collectInteractives(rocket, playerPos, range) {
     const result = []
     if (!rocket) return result

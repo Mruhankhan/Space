@@ -1,18 +1,38 @@
-import React, { memo, useRef, useCallback } from 'react'
+import React, { memo, useRef, useCallback, useEffect, useState } from 'react'
 import { sound } from '../sound.js'
 import { input } from '../input.js'
 import TouchJoystick from './TouchJoystick.jsx'
 
 const ROCKET_POS = { x: 0, z: 0 }
+const TOOLTIP_KEY = 'srbs_controls_tooltip_shown'
+
+function useTooltipVisibility() {
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const shown = sessionStorage.getItem(TOOLTIP_KEY)
+    if (!shown) {
+      setVisible(true)
+      const timer = setTimeout(() => {
+        setVisible(false)
+        sessionStorage.setItem(TOOLTIP_KEY, '1')
+      }, 8000)
+      return () => clearTimeout(timer)
+    }
+  }, [])
+  return visible
+}
 
 function HUD({
   deck, position, onExitToMenu, onLaunch,
   insideRocket, launchReady, consoleProgress,
   forceTouch = false,
   consoleActivated = null,
+  playerYaw = 0,
+  mission = null,
 }) {
   const pos = position || { x: 0, y: 0, z: 0 }
   const lastTouchAction = useRef(0)
+  const tooltipVisible = useTooltipVisibility()
 
   const runAction = useCallback((action) => {
     sound.play('click')
@@ -33,16 +53,15 @@ function HUD({
 
   const showTouch = forceTouch || input.isCoarsePointer()
 
-  // Compass: angle from player to rocket in world space, converted to
-  // camera-relative by subtracting the player's yaw.
-  // For a simple arrow we just rotate by the world-space delta angle
-  // (player rotates the camera, so the arrow stays world-fixed).
+  // Compass using player yaw for camera-relative rotation.
   const dx = ROCKET_POS.x - pos.x
   const dz = ROCKET_POS.z - pos.z
-  const worldAngle = Math.atan2(dx, -dz)  // 0 = north, increasing clockwise
+  const worldAngle = Math.atan2(dx, -dz)
   const dist = Math.sqrt(dx * dx + dz * dz)
-  // Arrow shown only when outside and rocket is far enough to need pointing.
   const showCompass = !insideRocket && dist > 4
+
+  // Camera-relative arrow angle.
+  const arrowRot = ((worldAngle - playerYaw) * 180) / Math.PI
 
   return (
     <div className="hud">
@@ -52,7 +71,7 @@ function HUD({
         <div className="crosshair-dot" />
       </div>
 
-      {/* Console flash overlay — quick cyan vignette when activated. */}
+      {/* Console flash overlay */}
       {consoleActivated && (
         <div className="console-flash" key={consoleActivated + ':' + Date.now()} />
       )}
@@ -65,7 +84,8 @@ function HUD({
         </div>
       )}
 
-      <div className="hud-top">
+      {/* Top-left: Coords + Deck */}
+      <div className="hud-top-left">
         <div className="hud-panel">
           {insideRocket ? (
             <div className="deck-indicator">
@@ -87,46 +107,32 @@ function HUD({
             X {pos.x.toFixed(1)} &nbsp; Y {pos.y.toFixed(1)} &nbsp; Z {pos.z.toFixed(1)}
           </div>
         </div>
+      </div>
 
-        <div className="hud-panel" style={{ alignItems: 'flex-end' }}>
-          <div className="label-xs">Suit Systems</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-            {[['O₂', 98, 'var(--c-cyan)'], ['Power', 100, 'var(--c-success)'], ['Pressure', 100, 'var(--c-amber)']].map(([label, val, color]) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10 }}>
-                <span style={{ color: 'var(--c-muted)', width: 48 }}>{label}</span>
-                <div style={{ width: 60, height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ width: `${val}%`, height: '100%', background: color, borderRadius: 4 }} />
-                </div>
-                <span style={{ color, fontFamily: 'var(--font-display)', fontSize: 9 }}>{val}%</span>
-              </div>
-            ))}
-            <div style={{ marginTop: 8, fontSize: 10, color: launchReady ? 'var(--c-success)' : 'var(--c-amber)' }}>
-              {consoleProgress}
-            </div>
+      {/* Top-right: Mission */}
+      <div className="hud-top-right">
+        <div className="hud-panel" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+          <div className="label-xs">Mission</div>
+          <div style={{ fontSize: 13, fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--c-white)', marginTop: 2 }}>
+            {mission?.label || 'Free Roam'}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--c-muted)', marginTop: 4 }}>
+            {consoleProgress}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 10, color: launchReady ? 'var(--c-success)' : 'var(--c-amber)' }}>
+            {launchReady ? 'LAUNCH READY' : 'SYSTEMS CHECK'}
           </div>
         </div>
       </div>
 
-      <div className="hud-bottom">
-        <div className="hud-panel">
-          <div className="label-xs" style={{ marginBottom: 6 }}>Controls</div>
-          <div className="controls-guide">
-            <div className="control-row"><span className="key">W A S D</span><span>Move</span></div>
-            <div className="control-row"><span className="key">Space</span><span>Jump</span></div>
-            <div className="control-row"><span className="key">Shift</span><span>Sprint</span></div>
-            <div className="control-row"><span className="key">E</span><span>{insideRocket ? 'Deck / exit' : 'Board rocket'}</span></div>
-            <div className="control-row"><span className="key">Click</span><span>Look</span></div>
-            <div className="control-row"><span className="key">Esc</span><span>Pause</span></div>
-          </div>
-        </div>
-
-        {/* Rocket compass — small SVG arrow pointing at the rocket. */}
+      {/* Bottom-left: Compass + distance */}
+      <div className="hud-bottom-left">
         {showCompass && (
           <div className="hud-panel rocket-compass" aria-hidden="true">
             <div className="label-xs" style={{ marginBottom: 4 }}>Rocket</div>
             <svg width="60" height="60" viewBox="-30 -30 60 60">
               <circle cx="0" cy="0" r="26" fill="rgba(0,0,0,0.4)" stroke="var(--c-cyan)" strokeWidth="1" />
-              <g transform={`rotate(${(worldAngle * 180 / Math.PI).toFixed(1)})`}>
+              <g transform={`rotate(${arrowRot.toFixed(1)})`}>
                 <polygon
                   points="0,-18 8,8 0,4 -8,8"
                   fill="var(--c-cyan)"
@@ -140,29 +146,47 @@ function HUD({
             </svg>
           </div>
         )}
-
-        <div className="hud-actions">
-          <button
-            id="hud-launch-btn"
-            className="btn btn-amber"
-            onPointerUp={(e) => handleTouchAction(e, onLaunch)}
-            onClick={() => handleClickAction(onLaunch)}
-            title="Initiate launch sequence"
-          >
-            🔥 Launch Sequence
-          </button>
-          <button
-            id="hud-exit-btn"
-            className="btn btn-secondary"
-            onPointerUp={(e) => handleTouchAction(e, onExitToMenu)}
-            onClick={() => handleClickAction(onExitToMenu)}
-          >
-            ← Exit to Menu
-          </button>
-        </div>
       </div>
+
+      {/* Bottom-right: Buttons */}
+      <div className="hud-bottom-right">
+        <button
+          id="hud-launch-btn"
+          className="btn btn-amber"
+          onPointerUp={(e) => handleTouchAction(e, onLaunch)}
+          onClick={() => handleClickAction(onLaunch)}
+          title="Initiate launch sequence"
+        >
+          Launch Sequence
+        </button>
+        <button
+          id="hud-exit-btn"
+          className="btn btn-secondary"
+          onPointerUp={(e) => handleTouchAction(e, onExitToMenu)}
+          onClick={() => handleClickAction(onExitToMenu)}
+        >
+          Exit to Menu
+        </button>
+      </div>
+
+      {/* Controls tooltip — shown once via sessionStorage */}
+      {tooltipVisible && (
+        <div className="hud-tooltip">
+          <div className="label-xs" style={{ marginBottom: 6 }}>Controls</div>
+          <div className="controls-guide">
+            <div className="control-row"><span className="key">W A S D</span><span>Move</span></div>
+            <div className="control-row"><span className="key">Space</span><span>Jump</span></div>
+            <div className="control-row"><span className="key">Shift</span><span>Sprint</span></div>
+            <div className="control-row"><span className="key">E</span><span>{insideRocket ? 'Deck / exit' : 'Board rocket'}</span></div>
+            <div className="control-row"><span className="key">Click</span><span>Look</span></div>
+            <div className="control-row"><span className="key">Esc</span><span>Pause</span></div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 export default memo(HUD)
+
+

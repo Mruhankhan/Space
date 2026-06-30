@@ -385,6 +385,7 @@ export class Character {
 
   _tryActivateConsole(rocket) {
     const found = physics.collectInteractives(rocket, this.position, 1.9)
+  
     if (!found.length) return false
     found.sort((a, b) => a.distance - b.distance)
     const id = found[0].obj.userData.consoleId

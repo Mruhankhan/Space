@@ -1,7 +1,6 @@
 // world.js — Procedural scene geometry + collision data.
 // Returns:
 //   { floors: Mesh[], boxes: Mesh[], earthSphere, earthWire, orbitRing, sat }
-// Floors are walkable top surfaces; boxes are solid obstacles.
 
 import {
   AmbientLight,
@@ -25,12 +24,11 @@ import {
   Points,
   PointsMaterial,
   SphereGeometry,
-  SpotLight,
   TorusGeometry,
 } from 'three'
-import { physics } from './physics.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
-// ── Shared materials (single instance reused across the scene) ──
+// ── Shared materials ──
 const MAT = {
   concrete: new MeshStandardMaterial({ color: 0x87919a, roughness: 0.9, metalness: 0.04 }),
   metalDark: new MeshStandardMaterial({ color: 0x445566, roughness: 0.4, metalness: 0.8 }),
@@ -38,7 +36,8 @@ const MAT = {
   metalLight: new MeshStandardMaterial({ color: 0x7890a0, roughness: 0.4, metalness: 0.85 }),
   metalRung:  new MeshStandardMaterial({ color: 0x556677, roughness: 0.6, metalness: 0.6 }),
   glass:     new MeshStandardMaterial({ color: 0x88aacc, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.3 }),
-  ground:    new MeshStandardMaterial({ color: 0x2a3a26, roughness: 1.0, metalness: 0.0 }),
+  ground:    new MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.95, metalness: 0.0 }),
+  grass:     new MeshStandardMaterial({ color: 0x1a2e16, roughness: 1.0, metalness: 0.0 }),
   stripGlow: new MeshStandardMaterial({ color: 0x002244, emissive: 0x0055aa, emissiveIntensity: 1.2, roughness: 0.5 }),
   panel:     new MeshStandardMaterial({ color: 0x040c18, roughness: 0.85 }),
   wall:      new MeshStandardMaterial({ color: 0x030d20, roughness: 0.9, metalness: 0.5 }),
@@ -55,9 +54,11 @@ const MAT = {
   starPoint: new PointsMaterial({ color: 0xffffff, size: 0.75, sizeAttenuation: true }),
   postFence: new MeshStandardMaterial({ color: 0x556677, roughness: 0.6, metalness: 0.5 }),
   strobe:    new MeshStandardMaterial({ emissive: 0xff2200, emissiveIntensity: 1 }),
+  platform:  new MeshStandardMaterial({ color: 0x586b78, emissive: 0x1a3a5c, emissiveIntensity: 0.5, roughness: 0.5, metalness: 0.7 }),
+  trench:    new MeshStandardMaterial({ color: 0x152030, roughness: 0.9 }),
+  mark:      new MeshBasicMaterial({ color: 0x666655 }),
 }
 
-// Cached starfield geometry (regenerated only if missing).
 let _starGeo = null
 function getStars() {
   if (_starGeo) return _starGeo
@@ -82,6 +83,34 @@ function addStars(scene) {
   stars.userData.persistent = true
   scene.add(stars)
   return stars
+}
+
+// ── Merge helper for decorative meshes ──
+function mergeByMaterial(meshes) {
+  const groups = new Map()
+  for (const m of meshes) {
+    const key = m.material.uuid
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(m)
+  }
+  const result = []
+  for (const group of groups.values()) {
+    if (group.length < 2) {
+      result.push(...group)
+      continue
+    }
+    const geoms = group.map(m => {
+      m.updateMatrixWorld()
+      const g = m.geometry.clone()
+      g.applyMatrix4(m.matrixWorld)
+      return g
+    })
+    const merged = mergeGeometries(geoms)
+    const mesh = new Mesh(merged, group[0].material)
+    mesh.userData.persistent = true
+    result.push(mesh)
+  }
+  return result
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -129,7 +158,6 @@ export function buildMenuScene(scene) {
   sat.userData.persistent = true
   scene.add(sat)
 
-  // Monitor screens on wall (instanced).
   const screenPositions = [-12, -6, 0, 6, 12]
   const screenColors = [0x003388, 0x004400, 0x330033, 0x003333, 0x220044]
   for (let i = 0; i < screenPositions.length; i++) {
@@ -150,7 +178,6 @@ export function buildMenuScene(scene) {
     scene.add(scr)
   }
 
-  // Neon light strips.
   for (let x = -20; x <= 20; x += 8) {
     const strip = new Mesh(new BoxGeometry(0.1, 0.1, 50), MAT.stripGlow)
     strip.position.set(x, 8, 0)
@@ -158,11 +185,9 @@ export function buildMenuScene(scene) {
     scene.add(strip)
   }
 
-  // Control desks.
   for (const x of [-10, 0, 10]) {
     const desk = new Mesh(new BoxGeometry(4, 1, 1.5), MAT.metalDark)
     desk.position.set(x, 0.5, 3)
-    desk.castShadow = true
     desk.receiveShadow = true
     desk.userData.persistent = true
     scene.add(desk)
@@ -211,7 +236,6 @@ export function buildHangarScene(scene) {
   pedRing.userData.persistent = true
   scene.add(pedRing)
 
-  // Side walls + status screens (instanced).
   const screenMatrices = []
   for (const [x, rx] of [[-18, 0], [18, Math.PI]]) {
     const wall = new Mesh(new PlaneGeometry(30, 12), MAT.panel)
@@ -236,13 +260,14 @@ export function buildHangarScene(scene) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  FACILITY SCENE — Full launch complex
+//  FACILITY SCENE
 // ─────────────────────────────────────────────────────────────
 export function buildFacilityScene(scene) {
   scene.background = new Color(0x061728)
-  scene.fog = new FogExp2(0x061728, 0.007)
+  scene.fog = new FogExp2(0x061728, 0.003)
 
   const objs = { floors: [], boxes: [] }
+  const toMerge = []
 
   // ── Ground ──
   const ground = new Mesh(new PlaneGeometry(400, 400), MAT.ground)
@@ -252,7 +277,15 @@ export function buildFacilityScene(scene) {
   scene.add(ground)
   objs.ground = ground
 
-  // ── Launchpad (cylinder floor) ──
+  // Grass
+  const grass = new Mesh(new PlaneGeometry(1600, 1600), MAT.grass)
+  grass.rotation.x = -Math.PI / 2
+  grass.position.y = -0.01
+  grass.receiveShadow = true
+  grass.userData.persistent = true
+  scene.add(grass)
+
+  // ── Launchpad ──
   const launchpad = new Mesh(new CylinderGeometry(18, 18, 0.6, 32), MAT.concrete)
   launchpad.receiveShadow = true
   launchpad.castShadow = true
@@ -260,18 +293,28 @@ export function buildFacilityScene(scene) {
   scene.add(launchpad)
   objs.floors.push(launchpad)
 
-  // Surface marks.
-  const markMat = new MeshBasicMaterial({ color: 0x666655 })
-  for (const r of [4, 8, 12]) {
-    const circle = new Mesh(new TorusGeometry(r, 0.1, 4, 64), markMat)
-    circle.rotation.x = -Math.PI / 2
-    circle.position.y = 0.35
-    circle.userData.persistent = true
-    scene.add(circle)
+  // Flame trench
+  const trench = new Mesh
+    ? new Mesh(new BoxGeometry(4, 2, 20), MAT.trench)
+    : null
+  if (trench) {
+    trench.position.set(0, -1, 0)
+    trench.userData.persistent = true
+    scene.add(trench)
   }
 
-  // ── Launch tower columns ──
+  // Surface marks
+  for (const r of [4, 8, 12]) {
+    const circle = new Mesh(new TorusGeometry(r, 0.1, 4, 64), MAT.mark)
+    circle.rotation.x = -Math.PI / 2
+    circle.position.y = 0.35
+    toMerge.push(circle)
+  }
+
+  // ── Launch tower ──
   const towerX = -12
+  const columns = []
+Vous
   for (let ix = 0; ix < 2; ix++) {
     for (let iz = 0; iz < 2; iz++) {
       const col = new Mesh(new BoxGeometry(0.8, 50, 0.8), MAT.metalDark)
@@ -282,23 +325,41 @@ export function buildFacilityScene(scene) {
     }
   }
 
-  // Tower platforms every 6m.
+  // Tower platforms
+  const platformMeshes = []
   for (let y = 0; y <= 50; y += 6) {
-    const platform = new Mesh(new BoxGeometry(5, 0.2, 5), MAT.metalMid)
+    const platform = new Mesh(new BoxGeometry(7, 0.35, 7), MAT.platform)
     platform.position.set(towerX, y, 0)
     platform.receiveShadow = true
     platform.userData.persistent = true
     scene.add(platform)
+    platformMeshes.push(platform)
     objs.floors.push(platform)
   }
 
-  // Swing arm.
+  // X-braces
+  const BRACE_Y = [10, 22, 34, 46]
+  const barLen = Math.sqrt(32)
+  for (const y of BRACE_Y) {
+    const b1 = new Mesh(new BoxGeometry(0.1, 0.1, barLen), MAT.metalDark)
+    b1.position.set(towerX, y, 0)
+    b1.rotation.y = Math.PI / 4
+    b1.userData.persistent = true
+    toMerge.push(b1)
+    const b2 = new Mesh(new BoxGeometry(0.1, 0.1, barLen), MAT.metalDark)
+    b2.position.set(towerX, y, 0)
+    b2.rotation.y = -Math.PI / 4
+    b2.userData.persistent = true
+    toMerge.push(b2)
+  }
+
+  // Swing arm
   const arm = new Mesh(new BoxGeometry(12, 0.3, 1.0), MAT.metalLight)
   arm.position.set(towerX + 4, 48, 0)
   arm.userData.persistent = true
   scene.add(arm)
 
-  // Tower ladder rungs (instanced).
+  // Tower ladder rungs (instanced)
   const rungGeo = new CylinderGeometry(0.05, 0.05, 4.2, 4)
   const rungCount = 25
   const rungs = new InstancedMesh(rungGeo, MAT.metalRung, rungCount)
@@ -312,53 +373,75 @@ export function buildFacilityScene(scene) {
   rungs.userData.persistent = true
   scene.add(rungs)
 
-  // Tower strobes.
+  // Tower strobes / warning lights
+  const strobeMeshes = []
   for (let y = 10; y <= 50; y += 10) {
     const strobe = new Mesh(new SphereGeometry(0.2, 6, 6), MAT.strobe)
     strobe.position.set(towerX - 2.5, y, 0)
     strobe.userData.persistent = true
-    scene.add(strobe)
+    strobeMeshes.push(strobe)
+    toMerge.push(strobe)
   }
 
   // ── Mission Control building ──
-  const mcBase = new Mesh(new BoxGeometry(24, 8, 16), MAT.concrete)
-  mcBase.position.set(-50, 4, -15)
+  const mcBase = new Mesh(new BoxGeometry(30, 10, 20), MAT.concrete)
+  mcBase.position.set(-50, 5, -15)
   mcBase.receiveShadow = true
+  mcBase.castShadow = true
   mcBase.userData.persistent = true
   scene.add(mcBase)
   objs.boxes.push(mcBase)
 
+  // MC roof
+  const mcRoof = new Mesh(new BoxGeometry(32, 0.3, 22), MAT.concrete)
+  mcRoof.position.set(-50, 10.15, -15)
+  mcRoof.userData.persistent = true
+  scene.add(mcRoof)
+
+  // Satellite dish
+  const dish = new Mesh(new CylinderGeometry(3, 0, 0.5, 16), MAT.antenna)
+  dish.position.set(-40, 14, -15)
+  dish.userData.persistent = true
+  scene.add(dish)
+  const dishPole = new Mesh(new CylinderGeometry(0.1, 0.1, 3, 6), MAT.antenna)
+  dishPole.position.set(-40, 12, -15)
+  dishPole.userData.persistent = true
+  scene.add(dishPole)
+
+  // MC windows
   for (let i = 0; i < 8; i++) {
     const win = new Mesh(new BoxGeometry(2, 1.5, 0.1), MAT.glass)
-    win.position.set(-50 - 10 + i * 3, 5, -7)
+    win.position.set(-50 - 12 + i * 3.5, 7, -5)
     win.userData.persistent = true
     scene.add(win)
     const glow = new Mesh(
       new BoxGeometry(1.8, 1.3, 0.05),
       new MeshStandardMaterial({ emissive: 0xffaa44, emissiveIntensity: 0.6 })
     )
-    glow.position.set(-50 - 10 + i * 3, 5, -7.1)
+    glow.position.set(-50 - 12 + i * 3.5, 7, -4.9)
     glow.userData.persistent = true
     scene.add(glow)
   }
 
+  // Sign
   const sign = new Mesh(
     new BoxGeometry(12, 1, 0.12),
     new MeshStandardMaterial({ color: 0x112238, emissive: 0x0aa7ff, emissiveIntensity: 0.55 })
   )
-  sign.position.set(-50, 8.9, -6.88)
+  sign.position.set(-50, 10.15, -5)
   sign.userData.persistent = true
   scene.add(sign)
 
+  // Antenna
   const antenna = new Mesh(new CylinderGeometry(0.06, 0.06, 6, 6), MAT.antenna)
-  antenna.position.set(-50, 11, -15)
+  antenna.position.set(-50, 13, -15)
   antenna.userData.persistent = true
   scene.add(antenna)
   const antennaBall = new Mesh(
     new SphereGeometry(0.2, 8, 8),
     new MeshStandardMaterial({ color: 0x440000, emissive: 0xff0000, emissiveIntensity: 1 })
   )
-  antennaBall.position.set(-50, 14.1, -15)
+  antennaBall.position.set(-50, 16.1, -15)
   antennaBall.userData.persistent = true
   scene.add(antennaBall)
 
@@ -393,9 +476,9 @@ export function buildFacilityScene(scene) {
   road.userData.persistent = true
   scene.add(road)
 
-  // ── Directional sun (single light, casts shadows). ──
-  const sun = new DirectionalLight(0xfff0d0, 1.2)
-  sun.position.set(40, 60, 30)
+  // ── Lights ──
+  const sun = new DirectionalLight(0xffe8c0, 0.9)
+  sun.position.set(60, 80, 40)
   sun.castShadow = true
   sun.shadow.mapSize.set(512, 512)
   sun.shadow.camera.near = 0.5
@@ -408,14 +491,39 @@ export function buildFacilityScene(scene) {
   sun.userData.persistent = true
   scene.add(sun)
 
-  // ── Fill lighting (so undersides aren't pitch black) ──
-  const facilityAmbient = new AmbientLight(0xffffff, 1.5)
+  const facilityAmbient = new AmbientLight(0x0a1628, 0.7)
   facilityAmbient.userData.persistent = true
   scene.add(facilityAmbient)
 
-  const facilityHemi = new HemisphereLight(0xa0c0ff, 0x203040, 1.2)
+  const facilityHemi = new HemisphereLight(0x8ab4d4, 0x1a2a18, 0.8)
   facilityHemi.userData.persistent = true
   scene.add(facilityHemi)
+
+  // Tower base lights
+  const towerLight1 = new PointLight(0xff4400, 2, 25)
+  towerLight1.position.set(towerX, 2, 0)
+  towerLight1.userData.persistent = true
+  scene.add(towerLight1)
+
+  const towerLight2 = new PointLight(0xff4400, 2, 25)
+  towerLight2.position.set(towerX, 2, 4)
+  towerLight2.userData.persistent = true
+  scene.add(towerLight2)
+
+  // MC light
+  const mcLight = new PointLight(0x44aaff, 1.5, 40)
+  mcLight.position.set(-50, 4, -15)
+  mcLight.userData.persistent = true
+  scene.add(mcLight)
+
+  // ── Merge decorative meshes ──
+  if (toMerge.length > 0) {
+    const merged = mergeByMaterial(toMerge)
+    for (const m of merged) {
+      m.userData.persistent = true
+      scene.add(m)
+    }
+  }
 
   addStars(scene)
 
