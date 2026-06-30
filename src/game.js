@@ -1,43 +1,45 @@
 // game.js — State machine and game loop orchestrator
 
-import { renderer }      from './renderer.js'
-import { physics }       from './physics.js'
-import { input }         from './input.js'
-import { sound }         from './sound.js'
-import { particles }     from './particles.js'
+import { renderer } from './renderer.js'
+import { physics } from './physics.js'
+import { input } from './input.js'
+import { sound } from './sound.js'
+import { particles } from './particles.js'
 import { buildMenuScene, buildHangarScene, buildFacilityScene } from './world.js'
-import { buildRocket }   from './rocket.js'
-import { Character }     from './character.js'
-import { Launch }        from './launch.js'
-import { getRockets }    from './save.js'
+import { loadRocket } from './loaders.js'
+import { Character } from './character.js'
+import { Launch } from './launch.js'
+import { getRockets } from './save.js'
 
 export const STATES = {
-  LOADING:      'LOADING',
-  PROFILE:      'PROFILE',
-  MAIN_MENU:    'MAIN_MENU',
-  HANGAR:       'HANGAR',
-  FACILITY:     'FACILITY',
-  LAUNCH:       'LAUNCH',
+  LOADING: 'LOADING',
+  PROFILE: 'PROFILE',
+  MAIN_MENU: 'MAIN_MENU',
+  HANGAR: 'HANGAR',
+  FACILITY: 'FACILITY',
+  LAUNCH: 'LAUNCH',
 }
 
 const FIXED_TICK = 1 / 90
 const MAX_ACCUMULATOR = 0.25
+const FACILITY_BROADCAST_INTERVAL = 0.1 // seconds (100ms)
 
 class Game {
   constructor() {
-    this.state       = STATES.LOADING
-    this._uiCallback = null   // called (state, payload) to update React UI
-    this._sceneData  = {}
-    this._character  = null
-    this._rocket     = null
-    this._launch     = null
-    this._menuTime   = 0
+    this.state = STATES.LOADING
+    this._uiCallback = null
+    this._sceneData = {}
+    this._character = null
+    this._rocket = null
+    this._launch = null
+    this._menuTime = 0
     this._warningFlash = 0
-    this._facilityUiTimer = 0
+    this._facilityUiTimer = FACILITY_BROADCAST_INTERVAL
     this._animatedRocketParts = { cores: [], warnings: [] }
     this._accumulator = 0
     this._rocketConsoleState = {}
     this._rocketConsoleCount = 0
+    this._rocketLoadSeq = 0
   }
 
   _prepareRocketConsoleState() {
@@ -56,6 +58,22 @@ class Game {
     return this._rocketConsoleCount === 0 || Object.values(this._rocketConsoleState).every(Boolean)
   }
 
+  _clearRocket() {
+    if (!this._rocket) return
+    renderer.disposeObject(this._rocket)
+    renderer.scene.remove(this._rocket)
+    this._rocket = null
+    this._animatedRocketParts = { cores: [], warnings: [] }
+  }
+
+  _attachRocket(rocket, position) {
+    this._clearRocket()
+    this._rocket = rocket
+    this._rocket.position.copy(position)
+    renderer.scene.add(this._rocket)
+    this._cacheRocketAnimations()
+  }
+
   _activateRocketConsole(consoleId) {
     if (!consoleId || !this._rocketConsoleState.hasOwnProperty(consoleId)) return
     if (this._rocketConsoleState[consoleId]) return
@@ -63,11 +81,10 @@ class Game {
     const activeCount = Object.values(this._rocketConsoleState).filter(Boolean).length
     this._uiCallback?.(STATES.FACILITY, {
       consoleProgress: `${activeCount}/${this._rocketConsoleCount} systems online`,
-    launchReady: this._canLaunch(),
+      launchReady: this._canLaunch(),
     })
   }
 
-  
   // ── Initialization ─────────────────────────────────────────
   async init() {
     renderer.init()
@@ -78,7 +95,7 @@ class Game {
   }
 
   // ── State transitions ──────────────────────────────────────
-  transition(newState, payload = {}) {
+  async transition(newState, payload = {}) {
     console.log(`[game] ${this.state} → ${newState}`)
 
     // Cleanup previous state
@@ -111,10 +128,13 @@ class Game {
         buildHangarScene(renderer.scene)
         const rockets = getRockets()
         const rocketConfig = payload.rocket || rockets[0]
-        this._rocket = buildRocket(rocketConfig)
-        this._rocket.position.set(0, 0.2, 0)
-        renderer.scene.add(this._rocket)
-        this._cacheRocketAnimations()
+        const loadSeq = ++this._rocketLoadSeq
+        const rocket = await loadRocket(rocketConfig)
+        if (this.state === STATES.HANGAR && loadSeq === this._rocketLoadSeq && rocket) {
+          this._attachRocket(rocket, { x: 0, y: 0.2, z: 0 })
+        } else if (rocket) {
+          renderer.disposeObject(rocket)
+        }
         input.disable()
         sound.setAmbient('hangar')
         renderer.camera.position.set(5, 9, 22)
@@ -134,30 +154,35 @@ class Game {
         }
 
         const rocketConfig = payload.rocket || getRockets()[0]
-        this._rocket = buildRocket(rocketConfig)
-        this._rocket.position.set(0, 0.3, 0)
-        renderer.scene.add(this._rocket)
-        this._cacheRocketAnimations()
-        this._registerRocketColliders()
-        this._prepareRocketConsoleState()
-        physics.addStatic(this._sceneData.ground)
+        const loadSeq = ++this._rocketLoadSeq
+        const rocket = await loadRocket(rocketConfig)
+        if (this.state === STATES.FACILITY && loadSeq === this._rocketLoadSeq && rocket) {
+          this._attachRocket(rocket, { x: 0, y: 0.3, z: 0 })
+          this._registerRocketColliders()
+          this._prepareRocketConsoleState()
+          physics.addStatic(this._sceneData.ground)
 
-        this._character = new Character(renderer.scene)
-        this._uiCallback?.(STATES.FACILITY, {
-          launchReady: this._canLaunch(),
-          consoleProgress: this._rocketConsoleCount > 0
-            ? `0/${this._rocketConsoleCount} systems online`
-            : 'No system checks required',
-        })
-        this._character.setPosition(8, 2, 8)
-        this._character.onDeckChange = (deckName) => {
-          this._uiCallback?.(STATES.FACILITY, { deckName })
+          this._character = new Character(renderer.scene)
+          this._uiCallback?.(STATES.FACILITY, {
+            launchReady: this._canLaunch(),
+            consoleProgress: this._rocketConsoleCount > 0
+              ? `0/${this._rocketConsoleCount} systems online`
+              : 'No system checks required',
+          })
+
+          this._character.setPosition(8, 2, 8)
+          // Use proper event emitter instead of direct property assignment.
+          this._character.on('deck', (e) => {
+            this._uiCallback?.(STATES.FACILITY, { deckName: e.name })
+          })
+          this._character.on('console', (e) => this._activateRocketConsole(e.consoleId))
+
+          input.enable()
+          sound.setAmbient('facility')
+          input.requestPointerLock()
+        } else if (rocket) {
+          renderer.disposeObject(rocket)
         }
-        this._character.onConsoleActivate = (consoleId) => this._activateRocketConsole(consoleId)
-
-        input.enable()
-        sound.setAmbient('facility')
-        input.requestPointerLock()
         break
       }
 
@@ -183,16 +208,13 @@ class Game {
     const keepRocketForLaunch = prev === STATES.FACILITY && next === STATES.LAUNCH
 
     if (prev === STATES.FACILITY && this._character) {
-      if (this._character) { this._character.dispose(); this._character = null }
+      this._character.dispose()
+      this._character = null
     }
 
     if (!keepRocketForLaunch && (prev === STATES.HANGAR || prev === STATES.FACILITY || prev === STATES.LAUNCH)) {
-      if (this._rocket) {
-        renderer.disposeObject(this._rocket)
-        renderer.scene.remove(this._rocket)
-        this._rocket = null
-      }
-      this._animatedRocketParts = { cores: [], warnings: [] }
+      this._rocketLoadSeq += 1
+      this._clearRocket()
     }
     if (prev === STATES.FACILITY || prev === STATES.LAUNCH) {
       particles.stop()
@@ -231,7 +253,6 @@ class Game {
     })
   }
 
-   
   // ── Game loop tick ─────────────────────────────────────────
   _tick(delta) {
     this._accumulator += delta
@@ -282,10 +303,10 @@ class Game {
     const { earthSphere, earthWire, orbitRing, sat } = this._sceneData
     if (earthSphere) {
       earthSphere.rotation.y += delta * 0.1
-      earthWire.rotation.y   -= delta * 0.05
-      orbitRing.rotation.z   += delta * 0.3
+      earthWire.rotation.y -= delta * 0.05
+      orbitRing.rotation.z += delta * 0.3
     }
-    if (sat) {
+    if (sat && earthSphere) {
       sat.userData.orbitEarth.angle += delta * 0.8
       const { radius, angle } = sat.userData.orbitEarth
       sat.position.set(
@@ -318,15 +339,16 @@ class Game {
     // Animate rocket interior
     this._animateRocketLights(delta, true)
 
-    // Broadcast position to UI at 8Hz instead of every animation frame.
+    // Broadcast position to UI at max 100ms (10Hz).
     this._facilityUiTimer += delta
-    if (this._facilityUiTimer < 0.125) return
+    if (this._facilityUiTimer < FACILITY_BROADCAST_INTERVAL) return
     this._facilityUiTimer = 0
     const pos = this._character.mesh.position
     this._uiCallback?.(STATES.FACILITY, {
       position: { x: pos.x, y: pos.y, z: pos.z },
       insideRocket: this._character.insideRocket,
       deckName: this._character.insideRocket ? (this._character.currentDeckName || 'BOARDING...') : null,
+      playerYaw: this._character.yaw || 0,
       launchReady: this._canLaunch(),
       consoleProgress: this._rocketConsoleCount > 0
         ? `${Object.values(this._rocketConsoleState).filter(Boolean).length}/${this._rocketConsoleCount} systems online`
@@ -375,14 +397,15 @@ class Game {
 
   previewRocket(config) {
     if (this.state !== STATES.HANGAR || !config) return
-    if (this._rocket) {
-      renderer.disposeObject(this._rocket)
-      renderer.scene.remove(this._rocket)
-    }
-    this._rocket = buildRocket(config)
-    this._rocket.position.set(0, 0.2, 0)
-    renderer.scene.add(this._rocket)
-    this._cacheRocketAnimations()
+    const loadSeq = ++this._rocketLoadSeq
+    this._clearRocket()
+    loadRocket(config).then((rocket) => {
+      if (this.state !== STATES.HANGAR || loadSeq !== this._rocketLoadSeq) {
+        if (rocket) renderer.disposeObject(rocket)
+        return
+      }
+      this._attachRocket(rocket, { x: 0, y: 0.2, z: 0 })
+    })
   }
 
   returnToMenu() {

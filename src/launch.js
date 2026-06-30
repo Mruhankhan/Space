@@ -156,13 +156,4 @@ export class Launch {
     }, 3000)
   }
 
-  isActive() { return this.state !== 'idle' }
-  getResult() {
-    return {
-      success: this._success,
-      altitude: Math.round(this._maxAltitude),
-      score: this._score,
-      tier: this._tier,
-    }
-  }
 }

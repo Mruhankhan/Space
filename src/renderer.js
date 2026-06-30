@@ -12,8 +12,8 @@ import {
   BasicShadowMap,
   ACESFilmicToneMapping,
   SRGBColorSpace,
-  Vector3,
 } from 'three'
+import { settings } from './settings.js'
 
 let _renderer, _scene, _camera
 let _animId = null
@@ -22,7 +22,6 @@ let _frame = 0
 let _onTick = null
 
 const PERSISTENT = new Set()
-const LISTENERS = new Set()
 
 export const renderer = {
   scene: null,
@@ -47,8 +46,10 @@ export const renderer = {
     _scene.fog = new FogExp2(0x020c1b, 0.012)
     this.scene = _scene
 
+    const fov = settings.get().fov ?? 70
+
     _camera = new PerspectiveCamera(
-      70,
+      fov,
       window.innerWidth / window.innerHeight,
       0.05,
       1500,
@@ -87,6 +88,14 @@ export const renderer = {
 
     window.addEventListener('resize', this._onResize.bind(this))
 
+    // Subscribe to settings changes for FOV updates.
+    settings.onChange((s) => {
+      if (_camera && s.fov !== undefined) {
+        _camera.fov = s.fov
+        _camera.updateProjectionMatrix()
+      }
+    })
+
     this.ready = true
   },
 
@@ -102,12 +111,6 @@ export const renderer = {
     _scene.fog = new FogExp2(color, density)
   },
 
-  /**
-   * Start the render loop. Each frame:
-   *   1. input.update()
-   *   2. onTick(delta, time)
-   *   3. renderer.render(scene, camera)
-   */
   startLoop(onTick) {
     this.stopLoop()
     _onTick = onTick
@@ -135,7 +138,6 @@ export const renderer = {
     }
   },
 
-  /** Remove every object that isn't flagged persistent. */
   clearScene() {
     const toRemove = []
     _scene.traverse(obj => {
@@ -161,9 +163,6 @@ export const renderer = {
   disposeObject(obj) {
     if (!obj) return
     obj.traverse(child => {
-      // Skip meshes whose geometry/material is owned by a module-level
-      // singleton cache (e.g. rocket.js G()/M()) — disposing them would
-      // break every subsequent build of the same kind.
       if (child.userData && child.userData.sharedGeometry) return
       if (child.geometry) child.geometry.dispose?.()
       if (child.material) {
@@ -176,14 +175,6 @@ export const renderer = {
     })
   },
 
-  addListener(fn) { LISTENERS.add(fn) },
-  removeListener(fn) { LISTENERS.delete(fn) },
-
-  /**
-   * Snapshot the current rendered frame as a PNG data URL.
-   * Without preserveDrawingBuffer the canvas is cleared after compositing,
-   * so we render a fresh frame immediately before reading pixels.
-   */
   getCanvasDataURL(type = 'image/png', quality = 0.92) {
     if (!_renderer) return null
     try {

@@ -1,39 +1,51 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { game, STATES }       from './game.js'
+import { game, STATES } from './game.js'
 import { getProfile, clearProgress } from './save.js'
-import ProfileScreen          from './ui/ProfileScreen.jsx'
-import MainMenu               from './ui/MainMenu.jsx'
-import HangarScreen           from './ui/HangarScreen.jsx'
-import HUD                    from './ui/HUD.jsx'
+import ProfileScreen from './ui/ProfileScreen.jsx'
+import MainMenu from './ui/MainMenu.jsx'
+import HangarScreen from './ui/HangarScreen.jsx'
+import HUD from './ui/HUD.jsx'
+import SettingsMenu from './ui/SettingsMenu.jsx'
 import { LaunchOverlay, ResultOverlay } from './ui/LaunchOverlay.jsx'
 
 export default function App() {
-  const [screen, setScreen]         = useState(STATES.LOADING)
-  const [profile, setProfile_]      = useState(null)
+  const [screen, setScreen] = useState(STATES.LOADING)
+  const [profile, setProfile_] = useState(null)
   const [activeMenu, setActiveMenu] = useState(null)
-  const [facilityData, setFacility] = useState({ position: { x:0,y:0,z:0 }, deckName: null, insideRocket: false })
-  const [launchData, setLaunch]     = useState({ countdown: 10, status: '', result: null })
+  const [facilityData, setFacility] = useState({ position: { x:0,y:0,z:0 }, deckName: null, insideRocket: false, playerYaw: 0 })
+  const [launchData, setLaunch] = useState({ countdown: 10, status: '', result: null })
   const [selectedRocket, setRocket] = useState(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   // Register UI callback into game.js
   const handleGameUpdate = useCallback((state, payload) => {
     setScreen(state)
     if (state === STATES.FACILITY) {
-      if (payload.position || payload.deckName !== undefined || payload.insideRocket !== undefined) {
+      if (payload.position || payload.deckName !== undefined || payload.insideRocket !== undefined || payload.playerYaw !== undefined) {
         setFacility(f => ({ ...f, ...payload }))
       }
     }
     if (state === STATES.LAUNCH) {
       setLaunch(l => ({
         ...l,
-        countdown:  payload.countdown  ?? l.countdown,
-        status:     payload.launchStatus ?? l.status,
-        result:     payload.result      ?? l.result,
+        countdown: payload.countdown ?? l.countdown,
+        status: payload.launchStatus ?? l.status,
+        result: payload.result ?? l.result,
       }))
     }
   }, [])
 
-  
+  // Escape key listener for settings menu in facility state
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'Escape') {
+        setShowSettings(s => !s)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [])
+
   useEffect(() => {
     game.onUIUpdate(handleGameUpdate)
     game.init().then(() => {
@@ -94,7 +106,7 @@ export default function App() {
     setActiveMenu(null)
     setRocket(null)
     setLaunch({ countdown: 10, status: '', result: null })
-    setFacility({ position: { x: 0, y: 0, z: 0 }, deckName: null, insideRocket: false })
+    setFacility({ position: { x: 0, y: 0, z: 0 }, deckName: null, insideRocket: false, playerYaw: 0 })
     game.transition(STATES.PROFILE)
   }
 
@@ -127,6 +139,7 @@ export default function App() {
           deck={facilityData.deckName}
           position={facilityData.position}
           insideRocket={facilityData.insideRocket}
+          playerYaw={facilityData.playerYaw}
           onExitToMenu={handleReturnToMenu}
           onLaunch={handleLaunch}
         />
@@ -146,10 +159,8 @@ export default function App() {
           onReturnToMenu={handleReturnToMenu}
         />
       )}
+
+      {showSettings && <SettingsMenu onClose={() => setShowSettings(false)} />}
     </>
   )
 }
-
-
-
-

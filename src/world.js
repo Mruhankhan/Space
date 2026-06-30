@@ -25,6 +25,7 @@ import {
   PointsMaterial,
   SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
@@ -57,6 +58,9 @@ const MAT = {
   platform:  new MeshStandardMaterial({ color: 0x586b78, emissive: 0x1a3a5c, emissiveIntensity: 0.5, roughness: 0.5, metalness: 0.7 }),
   trench:    new MeshStandardMaterial({ color: 0x152030, roughness: 0.9 }),
   mark:      new MeshBasicMaterial({ color: 0x666655 }),
+  windowGlow: new MeshStandardMaterial({ emissive: 0xffaa44, emissiveIntensity: 0.6 }),
+  sign:      new MeshStandardMaterial({ color: 0x112238, emissive: 0x0aa7ff, emissiveIntensity: 0.55 }),
+  antennaBall: new MeshStandardMaterial({ color: 0x440000, emissive: 0xff0000, emissiveIntensity: 1 }),
 }
 
 let _starGeo = null
@@ -113,6 +117,16 @@ function mergeByMaterial(meshes) {
   return result
 }
 
+const BEAM_X_AXIS = new Vector3(1, 0, 0)
+function beamBetween(start, end, thickness, material) {
+  const dir = end.clone().sub(start)
+  const mesh = new Mesh(new BoxGeometry(dir.length(), thickness, thickness), material)
+  mesh.position.copy(start).add(end).multiplyScalar(0.5)
+  mesh.quaternion.setFromUnitVectors(BEAM_X_AXIS, dir.normalize())
+  mesh.userData.persistent = true
+  return mesh
+}
+
 // ─────────────────────────────────────────────────────────────
 //  MAIN MENU SCENE
 // ─────────────────────────────────────────────────────────────
@@ -155,6 +169,7 @@ export function buildMenuScene(scene) {
 
   const sat = new Mesh(new BoxGeometry(0.3, 0.1, 0.5), MAT.antenna)
   sat.position.copy(earthSphere.position)
+  sat.userData.orbitEarth = { radius: 5.5, angle: 0 }
   sat.userData.persistent = true
   scene.add(sat)
 
@@ -236,7 +251,6 @@ export function buildHangarScene(scene) {
   pedRing.userData.persistent = true
   scene.add(pedRing)
 
-  const screenMatrices = []
   for (const [x, rx] of [[-18, 0], [18, Math.PI]]) {
     const wall = new Mesh(new PlaneGeometry(30, 12), MAT.panel)
     wall.position.set(x, 6, 0)
@@ -294,14 +308,10 @@ export function buildFacilityScene(scene) {
   objs.floors.push(launchpad)
 
   // Flame trench
-  const trench = new Mesh
-    ? new Mesh(new BoxGeometry(4, 2, 20), MAT.trench)
-    : null
-  if (trench) {
-    trench.position.set(0, -1, 0)
-    trench.userData.persistent = true
-    scene.add(trench)
-  }
+  const trench = new Mesh(new BoxGeometry(4, 2, 20), MAT.trench)
+  trench.position.set(0, -1, 0)
+  trench.userData.persistent = true
+  scene.add(trench)
 
   // Surface marks
   for (const r of [4, 8, 12]) {
@@ -313,8 +323,6 @@ export function buildFacilityScene(scene) {
 
   // ── Launch tower ──
   const towerX = -12
-  const columns = []
-Vous
   for (let ix = 0; ix < 2; ix++) {
     for (let iz = 0; iz < 2; iz++) {
       const col = new Mesh(new BoxGeometry(0.8, 50, 0.8), MAT.metalDark)
@@ -326,31 +334,33 @@ Vous
   }
 
   // Tower platforms
-  const platformMeshes = []
   for (let y = 0; y <= 50; y += 6) {
     const platform = new Mesh(new BoxGeometry(7, 0.35, 7), MAT.platform)
     platform.position.set(towerX, y, 0)
     platform.receiveShadow = true
     platform.userData.persistent = true
     scene.add(platform)
-    platformMeshes.push(platform)
     objs.floors.push(platform)
   }
 
   // X-braces
   const BRACE_Y = [10, 22, 34, 46]
-  const barLen = Math.sqrt(32)
   for (const y of BRACE_Y) {
-    const b1 = new Mesh(new BoxGeometry(0.1, 0.1, barLen), MAT.metalDark)
-    b1.position.set(towerX, y, 0)
-    b1.rotation.y = Math.PI / 4
-    b1.userData.persistent = true
-    toMerge.push(b1)
-    const b2 = new Mesh(new BoxGeometry(0.1, 0.1, barLen), MAT.metalDark)
-    b2.position.set(towerX, y, 0)
-    b2.rotation.y = -Math.PI / 4
-    b2.userData.persistent = true
-    toMerge.push(b2)
+    const y0 = y - 4
+    const y1 = y + 4
+    const braces = [
+      [new Vector3(towerX - 2, y0, -2), new Vector3(towerX + 2, y1, -2)],
+      [new Vector3(towerX + 2, y0, -2), new Vector3(towerX - 2, y1, -2)],
+      [new Vector3(towerX - 2, y0, 2), new Vector3(towerX + 2, y1, 2)],
+      [new Vector3(towerX + 2, y0, 2), new Vector3(towerX - 2, y1, 2)],
+      [new Vector3(towerX - 2, y0, -2), new Vector3(towerX - 2, y1, 2)],
+      [new Vector3(towerX - 2, y0, 2), new Vector3(towerX - 2, y1, -2)],
+      [new Vector3(towerX + 2, y0, -2), new Vector3(towerX + 2, y1, 2)],
+      [new Vector3(towerX + 2, y0, 2), new Vector3(towerX + 2, y1, -2)],
+    ]
+    for (const [start, end] of braces) {
+      toMerge.push(beamBetween(start, end, 0.12, MAT.metalDark))
+    }
   }
 
   // Swing arm
@@ -374,12 +384,10 @@ Vous
   scene.add(rungs)
 
   // Tower strobes / warning lights
-  const strobeMeshes = []
   for (let y = 10; y <= 50; y += 10) {
     const strobe = new Mesh(new SphereGeometry(0.2, 6, 6), MAT.strobe)
     strobe.position.set(towerX - 2.5, y, 0)
     strobe.userData.persistent = true
-    strobeMeshes.push(strobe)
     toMerge.push(strobe)
   }
 
@@ -396,54 +404,45 @@ Vous
   const mcRoof = new Mesh(new BoxGeometry(32, 0.3, 22), MAT.concrete)
   mcRoof.position.set(-50, 10.15, -15)
   mcRoof.userData.persistent = true
-  scene.add(mcRoof)
+  toMerge.push(mcRoof)
 
   // Satellite dish
   const dish = new Mesh(new CylinderGeometry(3, 0, 0.5, 16), MAT.antenna)
   dish.position.set(-40, 14, -15)
   dish.userData.persistent = true
-  scene.add(dish)
+  toMerge.push(dish)
   const dishPole = new Mesh(new CylinderGeometry(0.1, 0.1, 3, 6), MAT.antenna)
   dishPole.position.set(-40, 12, -15)
   dishPole.userData.persistent = true
-  scene.add(dishPole)
+  toMerge.push(dishPole)
 
   // MC windows
   for (let i = 0; i < 8; i++) {
     const win = new Mesh(new BoxGeometry(2, 1.5, 0.1), MAT.glass)
     win.position.set(-50 - 12 + i * 3.5, 7, -5)
     win.userData.persistent = true
-    scene.add(win)
-    const glow = new Mesh(
-      new BoxGeometry(1.8, 1.3, 0.05),
-      new MeshStandardMaterial({ emissive: 0xffaa44, emissiveIntensity: 0.6 })
-    )
+    toMerge.push(win)
+    const glow = new Mesh(new BoxGeometry(1.8, 1.3, 0.05), MAT.windowGlow)
     glow.position.set(-50 - 12 + i * 3.5, 7, -4.9)
     glow.userData.persistent = true
-    scene.add(glow)
+    toMerge.push(glow)
   }
 
   // Sign
-  const sign = new Mesh(
-    new BoxGeometry(12, 1, 0.12),
-    new MeshStandardMaterial({ color: 0x112238, emissive: 0x0aa7ff, emissiveIntensity: 0.55 })
-  )
+  const sign = new Mesh(new BoxGeometry(12, 1, 0.12), MAT.sign)
   sign.position.set(-50, 10.15, -5)
   sign.userData.persistent = true
-  scene.add(sign)
+  toMerge.push(sign)
 
   // Antenna
   const antenna = new Mesh(new CylinderGeometry(0.06, 0.06, 6, 6), MAT.antenna)
   antenna.position.set(-50, 13, -15)
   antenna.userData.persistent = true
-  scene.add(antenna)
-  const antennaBall = new Mesh(
-    new SphereGeometry(0.2, 8, 8),
-    new MeshStandardMaterial({ color: 0x440000, emissive: 0xff0000, emissiveIntensity: 1 })
-  )
+  toMerge.push(antenna)
+  const antennaBall = new Mesh(new SphereGeometry(0.2, 8, 8), MAT.antennaBall)
   antennaBall.position.set(-50, 16.1, -15)
   antennaBall.userData.persistent = true
-  scene.add(antennaBall)
+  toMerge.push(antennaBall)
 
   // ── Fuel tanks ──
   for (const [x, z, r, h] of [[10, -20, 3, 12], [20, -10, 2, 8], [15, -30, 2.5, 10]]) {

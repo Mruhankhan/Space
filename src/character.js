@@ -15,38 +15,38 @@ import {
 import { input } from './input.js'
 import { physics, CAPSULE_RADIUS, CAPSULE_TOTAL, PLAYER_EYE_OFFSET } from './physics.js'
 import { getDeckForY, DECK_NAMES } from './rocket.js'
+import { settings } from './settings.js'
 
-const WALK_SPEED       = 7.5
-const SPRINT_MULT      = 1.55
-const CROUCH_MULT      = 0.45
-const ACCEL            = 70
-const DECEL            = 90
-const AIR_CONTROL      = 0.55
-const JUMP_VELOCITY    = 7.2
-const GRAVITY          = -22.0
-const MAX_SLOPE_COS    = Math.cos(Math.PI / 4)
+const WALK_SPEED = 7.5
+const SPRINT_MULT = 1.55
+const CROUCH_MULT = 0.45
+const ACCEL = 70
+const DECEL = 90
+const AIR_CONTROL = 0.55
+const JUMP_VELOCITY = 7.2
+const GRAVITY = -22.0
+const MAX_SLOPE_COS = Math.cos(Math.PI / 4)
 
-const COYOTE_TIME      = 0.12   // seconds after leaving ground you can still jump
-const JUMP_BUFFER      = 0.14   // seconds before landing jump is buffered
-const MOUSE_SENS       = 0.0024
-const PAD_SENS         = 0.045
-const CAMERA_HEIGHT    = 0.62   // above feet
-const CAMERA_BACK      = 2.4
-const MIN_PITCH        = -1.30
-const MAX_PITCH        = 1.30
+const COYOTE_TIME = 0.12
+const JUMP_BUFFER = 0.14
+const PAD_SENS = 0.045
+const CAMERA_HEIGHT = 0.62
+const CAMERA_BACK = 2.4
+const MIN_PITCH = -1.30
+const MAX_PITCH = 1.30
 
-const DECK_HEIGHTS     = [3.25, 10.25, 18.25]
+const DECK_HEIGHTS = [3.25, 10.25, 18.25]
 
 // ── Astronaut procedural mesh ─────────────────────────────
 let _cachedMaterials = null
 function getAstronautMaterials() {
   if (_cachedMaterials) return _cachedMaterials
   _cachedMaterials = {
-    suit:   new MeshStandardMaterial({ color: 0xe8ece8, roughness: 0.6, metalness: 0.2 }),
-    dark:   new MeshStandardMaterial({ color: 0x223344, roughness: 0.7, metalness: 0.5 }),
-    visor:  new MeshStandardMaterial({ color: 0x002244, roughness: 0.05, metalness: 0.0, transparent: true, opacity: 0.75 }),
-    gold:   new MeshStandardMaterial({ color: 0xffcc44, roughness: 0.3, metalness: 0.8 }),
-    patch:  new MeshStandardMaterial({ emissive: 0x0044cc, emissiveIntensity: 0.6 }),
+    suit: new MeshStandardMaterial({ color: 0xe8ece8, roughness: 0.6, metalness: 0.2 }),
+    dark: new MeshStandardMaterial({ color: 0x223344, roughness: 0.7, metalness: 0.5 }),
+    visor: new MeshStandardMaterial({ color: 0x002244, roughness: 0.05, metalness: 0.0, transparent: true, opacity: 0.75 }),
+    gold: new MeshStandardMaterial({ color: 0xffcc44, roughness: 0.3, metalness: 0.8 }),
+    patch: new MeshStandardMaterial({ emissive: 0x0044cc, emissiveIntensity: 0.6 }),
   }
   return _cachedMaterials
 }
@@ -55,16 +55,16 @@ let _cachedGeometries = null
 function getAstronautGeometries() {
   if (_cachedGeometries) return _cachedGeometries
   _cachedGeometries = {
-    body:   new CapsuleGeometry(0.26, 0.5, 6, 12),
+    body: new CapsuleGeometry(0.26, 0.5, 6, 12),
     helmet: new SphereGeometry(0.22, 14, 14),
-    visor:  new SphereGeometry(0.19, 14, 14, 0, Math.PI * 1.2, 0.3, Math.PI * 0.55),
-    pack:   new BoxGeometry(0.35, 0.4, 0.12),
-    strip:  new CylinderGeometry(0.2, 0.2, 0.04, 16, 1, true, 0, Math.PI),
-    arm:    new CapsuleGeometry(0.1, 0.38, 4, 8),
-    glove:  new SphereGeometry(0.09, 8, 8),
-    leg:    new CapsuleGeometry(0.12, 0.42, 4, 8),
-    boot:   new BoxGeometry(0.18, 0.12, 0.28),
-    patch:  new CircleGeometry(0.07, 8),
+    visor: new SphereGeometry(0.19, 14, 14, 0, Math.PI * 1.2, 0.3, Math.PI * 0.55),
+    pack: new BoxGeometry(0.35, 0.4, 0.12),
+    strip: new CylinderGeometry(0.2, 0.2, 0.04, 16, 1, true, 0, Math.PI),
+    arm: new CapsuleGeometry(0.1, 0.38, 4, 8),
+    glove: new SphereGeometry(0.09, 8, 8),
+    leg: new CapsuleGeometry(0.12, 0.42, 4, 8),
+    boot: new BoxGeometry(0.18, 0.12, 0.28),
+    patch: new CircleGeometry(0.07, 8),
   }
   return _cachedGeometries
 }
@@ -136,32 +136,32 @@ export class Character {
     this.mesh = buildAstronaut()
     scene.add(this.mesh)
 
-    this.position = new Vector3(0, 1, 0)  // feet position
+    this.position = new Vector3(0, 1, 0) // feet position
     this.velocity = new Vector3()
-    this.facing   = 0    // yaw of body
-    this.grounded = false
+    this.facing = 0
+  this.grounded = false
     this.insideRocket = false
     this.currentDeck = -1
     this.currentDeckName = null
 
-    this._yaw   = 0
+    this._yaw = 0
     this._pitch = 0.18
 
     this._coyoteTimer = 0
-    this._jumpBuffer  = 0
-    this._walkPhase   = 0
+    this._jumpBuffer = 0
+    this._walkPhase = 0
 
     this._listeners = new Set()
   }
 
+  get yaw() { return this._yaw }
+
   on(name, fn) {
-    this._listeners.add({ name, fn })
-    return () => {
-      for (const entry of this._listeners) {
-        if (entry.name === name && entry.fn === fn) this._listeners.delete(entry)
-      }
-    }
+    const entry = { name, fn }
+    this._listeners.add(entry)
+    return () => { this._listeners.delete(entry) }
   }
+
   _emit(name, payload) {
     for (const entry of this._listeners) {
       if (entry.name === name) {
@@ -176,7 +176,6 @@ export class Character {
     this._syncMesh()
   }
 
-  /** Place character at world position; syncs mesh immediately. */
   setPosition(x, y, z) { this.setFeet(x, y, z) }
 
   _syncMesh() {
@@ -188,23 +187,17 @@ export class Character {
     this.mesh.rotation.y = this.facing
   }
 
-  /**
-   * Per-frame update.
-   * Pipeline (matches renderer):
-   *   1. read raw mouse + gamepad look input
-   *   2. apply look to yaw/pitch instantly (no smoothing)
-   *   3. read move axis, compute desired horizontal velocity
-   *   4. integrate jump + gravity
-   *   5. capsule move with sliding collision
-   *   6. instant camera position (no lerp)
-   */
-  update(delta, rocket) {
+  update(delta, camera, rocket) {
     // ── 1. Look ─────────────────────────────────────────────
+    const s = settings.get()
+    const mouseSens = s.mouseSensitivity ?? 0.0024
+    const invertY = s.invertY ? -1 : 1
+
     const md = input.consumeMouseDelta()
-    this._yaw   -= md.x * MOUSE_SENS
+    this._yaw -= md.x * mouseSens
     const pl = input.getLookAxis()
-    this._yaw   -= pl.x * PAD_SENS * delta
-    this._pitch -= (md.y * MOUSE_SENS) + (pl.y * PAD_SENS * delta)
+    this._yaw -= pl.x * PAD_SENS * delta
+    this._pitch -= (md.y * mouseSens * invertY) + (pl.y * PAD_SENS * delta)
     if (this._pitch < MIN_PITCH) this._pitch = MIN_PITCH
     if (this._pitch > MAX_PITCH) this._pitch = MAX_PITCH
 
@@ -215,11 +208,10 @@ export class Character {
 
     const cosY = Math.cos(this._yaw)
     const sinY = Math.sin(this._yaw)
-    // Forward in XZ plane for camera-relative move.
     const fx = -sinY
     const fz = -cosY
     const rx = -cosY
-    const rz =  sinY
+    const rz = sinY
 
     let mx = axis.x * rx + axis.y * fx
     let mz = axis.x * rz + axis.y * fz
@@ -255,7 +247,7 @@ export class Character {
       this.velocity.y = JUMP_VELOCITY
       this.grounded = false
       this._coyoteTimer = 0
-      this._jumpBuffer  = 0
+      this._jumpBuffer = 0
     }
 
     // ── 5. Capsule move + sliding ───────────────────────────
@@ -279,9 +271,8 @@ export class Character {
     if (horizSpeed > 0.5) {
       this._walkPhase += delta * (horizSpeed / WALK_SPEED) * 8
       const swing = Math.sin(this._walkPhase) * 0.55
-      if (this.mesh.userData.legL) this.mesh.userData.legL.rotation.x =  swing
+      if (this.mesh.userData.legL) this.mesh.userData.legL.rotation.x = swing
       if (this.mesh.userData.legR) this.mesh.userData.legR.rotation.x = -swing
-      // Body yaw blends toward move direction.
       const targetYaw = Math.atan2(-mz, -mx) + Math.PI
       const dy = ((targetYaw - this.facing + Math.PI) % (Math.PI * 2)) - Math.PI
       this.facing += dy * Math.min(1, delta * 12)
@@ -311,11 +302,6 @@ export class Character {
     return { grounded: this.grounded, insideRocket: this.insideRocket }
   }
 
-  /**
-   * Apply the camera transform for this frame.
-   * Camera is third-person, behind+above the player, looking at head.
-   * No lerp, no smoothing — instant response.
-   */
   applyCamera(camera) {
     const cosP = Math.cos(this._pitch)
     const sinP = Math.sin(this._pitch)
@@ -342,9 +328,7 @@ export class Character {
 
   _handleInteract(rocket) {
     if (this.insideRocket) {
-      // Try console activation first.
       if (rocket && this._tryActivateConsole(rocket)) return
-      // Otherwise cycle deck.
       const next = this.currentDeck + 1
       if (next >= DECK_HEIGHTS.length) {
         this.exitRocket()
@@ -355,7 +339,6 @@ export class Character {
         this._emit('deck', { from: next - 1, to: next, name: this.currentDeckName })
       }
     } else {
-      // Outside the rocket — board if standing near base.
       const dx = this.position.x
       const dz = this.position.z
       if (dx * dx + dz * dz < 4.0 && this.position.y < 3) {
@@ -363,8 +346,6 @@ export class Character {
       }
     }
   }
-
-
 
   enterRocket() {
     this.insideRocket = true
@@ -385,7 +366,6 @@ export class Character {
 
   _tryActivateConsole(rocket) {
     const found = physics.collectInteractives(rocket, this.position, 1.9)
-  
     if (!found.length) return false
     found.sort((a, b) => a.distance - b.distance)
     const id = found[0].obj.userData.consoleId
@@ -399,15 +379,14 @@ export class Character {
   }
 
   // Read-only accessors for UI broadcast.
-snapshot() {
+  snapshot() {
     return {
       x: this.position.x,
       y: this.position.y,
       z: this.position.z,
       insideRocket: this.insideRocket,
       deck: this.currentDeckName,
+      yaw: this._yaw,
     }
   }
 }
-
-
