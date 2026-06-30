@@ -2,6 +2,7 @@
 // Plays pre-decoded .wav buffers (loaded via loaders.js).
 
 import { loadAudio, getAudioContext } from './loaders.js'
+import { settings } from './settings.js'
 
 // ── State ─────────────────────────────────────────────────
 let _masterGain = null
@@ -13,7 +14,9 @@ function _ensureMasterGain() {
   if (_masterGain) return
   const ctx = getAudioContext()
   _masterGain = ctx.createGain()
-  _masterGain.gain.value = 0.3
+  // Read volume from settings with a fallback
+  const vol = settings.get().masterVolume ?? 0.3
+  _masterGain.gain.value = vol
   _masterGain.connect(ctx.destination)
 }
 
@@ -71,10 +74,6 @@ async function _startAmbientSource(name) {
     _ambientSource.gain = gain
     return true
   } catch { return false }
-}
-
-async function _stopAmbientSourceSentinel() {
-  _stopAmbientSource()
 }
 
 // ── Public API ────────────────────────────────────────────

@@ -1,10 +1,11 @@
 import React, { memo } from 'react'
 import { settings } from '../settings.js'
+import { sound } from '../sound.js'
 
-const LABEL = {
-  sensitivity: ['Mouse Sensitivity', '0.0005 – 0.02'],
+const LABELS = {
+  mouseSensitivity: ['Mouse Sensitivity', '0.0005 – 0.02'],
   fov: ['Field of View', '60° – 100°'],
-  volume: ['Master Volume', '0 – 100%'],
+  masterVolume: ['Master Volume', '0 – 100%'],
 }
 
 function Slider({ name, value, min, max, step, onChange }) {
@@ -13,10 +14,10 @@ function Slider({ name, value, min, max, step, onChange }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <label style={{ fontFamily: 'var(--font-display)', fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--c-cyan)' }}>
-          {LABEL[name][0]}
+          {LABELS[name]?.[0] || name}
         </label>
         <span style={{ fontFamily: 'var(--font-display)', fontSize: 10, color: 'var(--c-white)' }}>
-          {name === 'fov' ? `${Math.round(value)}°` : name === 'volume' ? `${Math.round(value * 100)}%` : value.toFixed(4)}
+          {name === 'fov' ? `${Math.round(value)}°` : name === 'masterVolume' ? `${Math.round(value * 100)}%` : value.toFixed(4)}
         </span>
       </div>
       <input
@@ -47,6 +48,7 @@ function SettingsMenu({ onClose }) {
     const next = { ...state, [key]: value }
     setState(next)
     settings.update({ [key]: value })
+    if (key === 'masterVolume') sound.setMasterVolume(value)
   }, [state])
 
   const handleToggleInvertY = React.useCallback(() => {
@@ -60,16 +62,16 @@ function SettingsMenu({ onClose }) {
           <div className="heading-sm" style={{ fontSize: 18, letterSpacing: 3 }}>Settings</div>
           <button
             className="btn btn-secondary"
-            onClick={onClose}
+            onClick={() => { sound.play('click'); onClose?.() }}
             style={{ padding: '8px 16px', fontSize: 11 }}
           >
             Close
           </button>
         </div>
 
-        <Slider name="sensitivity" value={state.mouseSensitivity} min={0.0005} max={0.02} step={0.0001} onChange={handleChange} />
+        <Slider name="mouseSensitivity" value={state.mouseSensitivity} min={0.0005} max={0.02} step={0.0001} onChange={handleChange} />
         <Slider name="fov" value={state.fov} min={60} max={100} step={1} onChange={handleChange} />
-        <Slider name="volume" value={state.masterVolume} min={0} max={1} step={0.05} onChange={handleChange} />
+        <Slider name="masterVolume" value={state.masterVolume} min={0} max={1} step={0.05} onChange={handleChange} />
 
         <label
           style={{

@@ -86,11 +86,6 @@ export function saveRocket(rocket) {
   localStorage.setItem(KEYS.ROCKETS, JSON.stringify(rockets))
 }
 
-export function deleteRocket(id) {
-  const rockets = getRockets().filter(r => r.id !== id)
-  localStorage.setItem(KEYS.ROCKETS, JSON.stringify(rockets))
-}
-
 // ── Pilot Log ─────────────────────────────────────────────
 export function getLog() {
   try {

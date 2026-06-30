@@ -1,4 +1,4 @@
-﻿// settings.js — persisted user settings (localStorage)
+// settings.js — persisted user settings (localStorage)
 // Single source of truth for mouse sensitivity, FOV, invert Y,
 // master volume, and graphics quality. Other modules subscribe to
 // changes via `onChange` so a settings-menu slider can take effect

@@ -139,7 +139,7 @@ export class Character {
     this.position = new Vector3(0, 1, 0) // feet position
     this.velocity = new Vector3()
     this.facing = 0
-  this.grounded = false
+    this.grounded = false
     this.insideRocket = false
     this.currentDeck = -1
     this.currentDeckName = null
@@ -155,6 +155,9 @@ export class Character {
   }
 
   get yaw() { return this._yaw }
+
+  /** Returns current camera yaw (horizontal look angle in radians). */
+  getCamYaw() { return this._yaw }
 
   on(name, fn) {
     const entry = { name, fn }

@@ -40,6 +40,15 @@ class Game {
     this._rocketConsoleState = {}
     this._rocketConsoleCount = 0
     this._rocketLoadSeq = 0
+    this._lastInsideRocket = null
+    this._lastDeckName = null
+    this._lastPrompt = null
+    this._lastInteractPressed = false
+    this._lastQPressed = false
+    this._lastYaw = null
+    this._lastPlayerPos = null
+    this._paused = false
+    this._escapeHandler = null
   }
 
   _prepareRocketConsoleState() {
@@ -91,6 +100,14 @@ class Game {
     await physics.init()
     particles.init(renderer.scene)
     renderer.startLoop(this._tick.bind(this))
+
+    // Escape key — toggle settings/pause (only during FACILITY/LAUNCH)
+    this._escapeHandler = (e) => {
+      if (e.code === 'Escape' && (this.state === STATES.FACILITY || this.state === STATES.LAUNCH)) {
+        this.togglePause()
+      }
+    }
+    window.addEventListener('keydown', this._escapeHandler)
     console.log('[game] Initialised')
   }
 
@@ -224,6 +241,13 @@ class Game {
     if (prev === STATES.LAUNCH) {
       this._launch = null
     }
+    this._lastInsideRocket = null
+    this._lastDeckName = null
+    this._lastPrompt = null
+    this._lastInteractPressed = false
+    this._lastQPressed = false
+    this._lastYaw = null
+    this._lastPlayerPos = null
   }
 
   _buildMenuRoom() {
@@ -234,6 +258,20 @@ class Game {
 
   // ── UI callback registration ───────────────────────────────
   onUIUpdate(cb) { this._uiCallback = cb }
+
+  // ── Pause / Settings ──────────────────────────────────────
+  togglePause() {
+    this._paused = !this._paused
+    if (this._paused) {
+      input.exitPointerLock()
+    } else {
+      // Re-request pointer lock when resuming
+      if (this.state === STATES.FACILITY) {
+        input.requestPointerLock()
+      }
+    }
+    this._uiCallback?.(this.state, { paused: this._paused })
+  }
 
   _cacheRocketAnimations() {
     const cores = []
@@ -253,8 +291,11 @@ class Game {
     })
   }
 
-  // ── Game loop tick ─────────────────────────────────────────
+  // ── Game loop tick ─────────────────────────────────
   _tick(delta) {
+    // Pause the game logic tick while settings are open
+    if (this._paused) return
+
     this._accumulator += delta
     if (this._accumulator > MAX_ACCUMULATOR) {
       this._accumulator = MAX_ACCUMULATOR
@@ -349,6 +390,7 @@ class Game {
       insideRocket: this._character.insideRocket,
       deckName: this._character.insideRocket ? (this._character.currentDeckName || 'BOARDING...') : null,
       playerYaw: this._character.yaw || 0,
+      playerPos: { x: pos.x, z: pos.z },
       launchReady: this._canLaunch(),
       consoleProgress: this._rocketConsoleCount > 0
         ? `${Object.values(this._rocketConsoleState).filter(Boolean).length}/${this._rocketConsoleCount} systems online`
@@ -407,10 +449,7 @@ class Game {
       this._attachRocket(rocket, { x: 0, y: 0.2, z: 0 })
     })
   }
-
-  returnToMenu() {
-    this.transition(STATES.MAIN_MENU)
-  }
 }
+
 
 export const game = new Game()

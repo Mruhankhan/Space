@@ -35,10 +35,6 @@ export class Launch {
     sound.play('confirm')
   }
 
-  abort() {
-    this._end(false, 'Mission aborted by pilot')
-  }
-
   /** Called from game loop each frame */
   update(delta, setCountdown, setStatus) {
     if (this.state === 'idle' || this.state === 'result') return
