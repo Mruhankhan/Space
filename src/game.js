@@ -376,6 +376,7 @@ class Game {
     if (!this._character) return
 
     const deck = this._character.update(delta, renderer.camera, this._rocket)
+    this._character.applyCamera(renderer.camera)
 
     // Animate rocket interior
     this._animateRocketLights(delta, true)
