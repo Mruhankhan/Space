@@ -33,6 +33,15 @@ class Game {
     this._warningFlash = 0
     this._facilityUiTimer = 0
     this._animatedRocketParts = { cores: [], warnings: [] }
+    this._lastInsideRocket = null
+    this._lastDeckName     = null
+    this._lastPrompt       = null
+    this._lastInteractPressed = false
+    this._lastQPressed     = false
+    this._lastYaw          = null
+    this._lastPlayerPos    = null
+    this._paused = false
+    this._escapeHandler = null
   }
 
   // ── Initialization ─────────────────────────────────────────
@@ -41,6 +50,14 @@ class Game {
     await physics.init()
     particles.init(renderer.scene)
     renderer.startLoop(this._tick.bind(this))
+
+    // Escape key — toggle settings/pause (only during FACILITY/LAUNCH)
+    this._escapeHandler = (e) => {
+      if (e.code === 'Escape' && (this.state === STATES.FACILITY || this.state === STATES.LAUNCH)) {
+        this.togglePause()
+      }
+    }
+    window.addEventListener('keydown', this._escapeHandler)
     console.log('[game] Initialised')
   }
 
@@ -157,6 +174,13 @@ class Game {
     if (prev === STATES.LAUNCH) {
       this._launch = null
     }
+    this._lastInsideRocket = null
+    this._lastDeckName = null
+    this._lastPrompt = null
+    this._lastInteractPressed = false
+    this._lastQPressed = false
+    this._lastYaw = null
+    this._lastPlayerPos = null
   }
 
   _buildMenuRoom() {
@@ -167,6 +191,20 @@ class Game {
 
   // ── UI callback registration ───────────────────────────────
   onUIUpdate(cb) { this._uiCallback = cb }
+
+  // ── Pause / Settings ──────────────────────────────────────
+  togglePause() {
+    this._paused = !this._paused
+    if (this._paused) {
+      input.exitPointerLock()
+    } else {
+      // Re-request pointer lock when resuming
+      if (this.state === STATES.FACILITY) {
+        input.requestPointerLock()
+      }
+    }
+    this._uiCallback?.(this.state, { paused: this._paused })
+  }
 
   _cacheRocketAnimations() {
     const cores = []
@@ -186,6 +224,9 @@ class Game {
 
   // ── Game loop tick ─────────────────────────────────────────
   _tick(delta) {
+    // Pause the game logic tick while settings are open
+    if (this._paused) return
+
     this._menuTime += delta
     this._warningFlash += delta
 
@@ -258,16 +299,96 @@ class Game {
     // Animate rocket interior
     this._animateRocketLights(delta, true)
 
-    // Broadcast position to UI at 8Hz instead of every animation frame.
-    this._facilityUiTimer += delta
-    if (this._facilityUiTimer < 0.125) return
-    this._facilityUiTimer = 0
+    // Direct DOM update for coordinates (optimized to avoid React re-render overhead)
     const pos = this._character.mesh.position
-    this._uiCallback?.(STATES.FACILITY, {
-      position: { x: pos.x, y: pos.y, z: pos.z },
-      insideRocket: this._character.insideRocket,
-      deckName: this._character.insideRocket ? (this._character.currentDeck >= 0 ? null : 'BOARDING...') : null
-    })
+    const coordsEl = document.getElementById('hud-coords')
+    if (coordsEl) {
+      coordsEl.innerHTML = `X ${pos.x.toFixed(1)} &nbsp; Y ${pos.y.toFixed(1)} &nbsp; Z ${pos.z.toFixed(1)}`
+    }
+
+    // Interaction checks
+    let prompt = null
+    if (!this._character.insideRocket) {
+      const distToRocket = pos.distanceTo(new THREE.Vector3(0, pos.y, 0))
+      if (distToRocket < 3.0) {
+        prompt = "BOARD ROCKET"
+        if (input.isAction('interact') && !this._lastInteractPressed) {
+          sound.play('confirm')
+          this._character.enterRocket()
+          this._character.mesh.position.set(0, 10.5, 0)
+        }
+      }
+    } else {
+      const currentDeck = this._character.currentDeck
+      if (currentDeck === 1) { // Crew Cabin
+        const exitPos = new THREE.Vector3(0, pos.y, 0.65)
+        const distToExit = pos.distanceTo(exitPos)
+        if (distToExit < 0.8) {
+          prompt = "EXIT TO LAUNCHPAD"
+          if (input.isAction('interact') && !this._lastInteractPressed) {
+            sound.play('confirm')
+            this._character.exitRocket()
+            this._character.mesh.position.set(2.5, 0.3, 2.5)
+          }
+        }
+      }
+
+      // Deck transitions near ladder (0.8, pos.y, 0)
+      const ladderPos = new THREE.Vector3(0.8, pos.y, 0)
+      if (pos.distanceTo(ladderPos) < 0.8) {
+        if (currentDeck === 0) { // Engineering
+          prompt = "CLIMB TO CREW CABIN"
+          if (input.isAction('interact') && !this._lastInteractPressed) {
+            sound.play('confirm')
+            this._character.mesh.position.set(0, 10.5, 0)
+          }
+        } else if (currentDeck === 1) { // Crew Cabin
+          prompt = "GO DOWN [Q] / GO UP"
+          if (input.isAction('interact') && !this._lastInteractPressed) {
+            sound.play('confirm')
+            this._character.mesh.position.set(0, 18.5, 0) // Up to Cockpit
+          }
+          if (input.isKey('KeyQ') && !this._lastQPressed) {
+            sound.play('confirm')
+            this._character.mesh.position.set(0, 3.5, 0) // Down to Engineering
+          }
+        } else if (currentDeck === 2) { // Cockpit
+          prompt = "GO DOWN TO CREW CABIN"
+          if (input.isAction('interact') && !this._lastInteractPressed) {
+            sound.play('confirm')
+            this._character.mesh.position.set(0, 10.5, 0)
+          }
+        }
+      }
+    }
+
+    this._lastInteractPressed = input.isAction('interact')
+    this._lastQPressed = input.isKey('KeyQ')
+
+    // Broadcast only on state change (deckName, insideRocket, interactionPrompt, or compass changes)
+    const inside = this._character.insideRocket
+    const finalDeck = inside ? (this._character.currentDeck !== -1 ? ['Engineering', 'Crew Cabin', 'Cockpit'][this._character.currentDeck] : 'BOARDING...') : null
+    const currentYaw = this._character.getCamYaw()
+    const currentPos = { x: pos.x, z: pos.z }
+    const yawChanged = this._lastYaw === null || Math.abs(currentYaw - this._lastYaw) > 0.04
+    const posChanged = this._lastPlayerPos === null ||
+      Math.abs(currentPos.x - this._lastPlayerPos.x) > 0.3 ||
+      Math.abs(currentPos.z - this._lastPlayerPos.z) > 0.3
+
+    if (inside !== this._lastInsideRocket || finalDeck !== this._lastDeckName || prompt !== this._lastPrompt || yawChanged || posChanged) {
+      this._lastInsideRocket = inside
+      this._lastDeckName = finalDeck
+      this._lastPrompt = prompt
+      this._lastYaw = currentYaw
+      this._lastPlayerPos = currentPos
+      this._uiCallback?.(STATES.FACILITY, {
+        insideRocket: inside,
+        deckName: finalDeck,
+        interactionPrompt: prompt,
+        playerYaw: currentYaw,
+        playerPos: currentPos,
+      })
+    }
   }
 
   _tickLaunch(delta) {
@@ -309,10 +430,7 @@ class Game {
     renderer.scene.add(this._rocket)
     this._cacheRocketAnimations()
   }
-
-  returnToMenu() {
-    this.transition(STATES.MAIN_MENU)
-  }
 }
+
 
 export const game = new Game()

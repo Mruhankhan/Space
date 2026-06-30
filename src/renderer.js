@@ -1,6 +1,7 @@
 // renderer.js — Three.js renderer, camera, scene, lighting
 
 import * as THREE from 'three'
+import { settings } from './settings.js'
 
 let _renderer, _scene, _camera, _animId, _resizeHandler
 
@@ -21,9 +22,15 @@ export const renderer = {
     this.scene = _scene
 
     // Camera
-    _camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000)
+    _camera = new THREE.PerspectiveCamera(settings.get().fov, window.innerWidth / window.innerHeight, 0.1, 2000)
     _camera.position.set(0, 5, 20)
     this.camera = _camera
+
+    // Subscribe to FOV changes from settings
+    settings.onChange(s => {
+      _camera.fov = s.fov
+      _camera.updateProjectionMatrix()
+    })
 
     // Renderer
     _renderer = new THREE.WebGLRenderer({

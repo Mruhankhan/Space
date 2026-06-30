@@ -1,5 +1,7 @@
 // sound.js — Web Audio API real-time synthesizer (no audio files needed)
 
+import { settings } from './settings.js'
+
 let _ctx = null
 let _masterGain = null
 let _ambientOsc = null
@@ -12,11 +14,12 @@ function _getCtx() {
   if (!_ctx) {
     _ctx = new (window.AudioContext || window.webkitAudioContext)()
     _masterGain = _ctx.createGain()
-    _masterGain.gain.value = 0.3
+    _masterGain.gain.value = settings.get().volume
     _masterGain.connect(_ctx.destination)
   }
   return _ctx
 }
+
 
 // ── Ambient Drone ──────────────────────────────────────────
 function _startAmbient(freq = 55, detune = 8) {

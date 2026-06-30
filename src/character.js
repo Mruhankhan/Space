@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { input } from './input.js'
 import { physics } from './physics.js'
 import { getDeckForY, DECK_NAMES } from './rocket.js'
+import { settings } from './settings.js'
 
 const WALK_SPEED  = 7
 const SPRINT_MULT = 1.8
@@ -114,15 +115,21 @@ export class Character {
     this.velocity.set(0, 0, 0)
   }
 
+  /** Returns current camera yaw (horizontal look angle in radians). */
+  getCamYaw() { return this._camYaw }
+
   /** Per-frame update. Returns current deck index (or -1). */
   update(delta, camera) {
-    // ── Mouse look ──────────────────────────────────────────
+    // ── Mouse look ────────────────────────────────────────────
     if (input.isPointerLocked()) {
+      const s = settings.get()
       const delta_ = input.consumeMouseDelta()
-      this._camYaw   -= delta_.x * 0.003
-      this._camPitch -= delta_.y * 0.003
+      this._camYaw   -= delta_.x * s.sensitivity
+      // Apply invertY: if enabled, flip the pitch direction
+      this._camPitch -= delta_.y * s.sensitivity * (s.invertY ? -1 : 1)
       this._camPitch  = Math.max(-0.6, Math.min(0.8, this._camPitch))
     }
+
 
     // ── Movement ────────────────────────────────────────────
     const mv = input.getMovement()

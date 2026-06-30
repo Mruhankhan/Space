@@ -31,10 +31,6 @@ export class Launch {
     sound.play('confirm')
   }
 
-  abort() {
-    this._end(false, 'Mission aborted by pilot')
-  }
-
   /** Called from game loop each frame */
   update(delta, setCountdown, setStatus) {
     if (this.state === 'idle' || this.state === 'result') return
@@ -113,6 +109,4 @@ export class Launch {
     }, 3000)
   }
 
-  isActive() { return this.state !== 'idle' }
-  getResult() { return { success: this._success, altitude: Math.round(this._maxAltitude) } }
 }
